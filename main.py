@@ -1,0 +1,340 @@
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks # <- Agrega BackgroundTasks
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+import models
+from database import engine, SessionLocal
+
+# 1. ¡La magia! Esta línea crea el archivo de la base de datos y las tablas automáticamente
+models.Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="API Centro Pilates")
+
+# 2. Función auxiliar para abrir y cerrar la conexión a la base de datos en cada petición
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# 3. Estructuras de datos que esperamos recibir desde la App de Flutter
+class LoginData(BaseModel):
+    email: str
+    password: str
+
+class RegistroData(BaseModel):
+    nombre: str
+    email: str
+    password: str
+
+class ReservaData(BaseModel):
+    usuario_id: int
+    clase_id: int
+
+# 4. NUEVO: Endpoint para registrar un usuario
+@app.post("/registro")
+def registrar_usuario(datos: RegistroData, db: Session = Depends(get_db)):
+    correo_limpio = datos.email.lower().strip()
+    
+    usuario_existente = db.query(models.Usuario).filter(models.Usuario.email == correo_limpio).first()
+    if usuario_existente:
+        raise HTTPException(status_code=400, detail="El correo ya está registrado")
+    
+    rol_asignado = "administrador" if correo_limpio == "admin@pilates.com" else "cliente"
+    # Si es el jefe, es Staff. Si es alumno nuevo, entra como Básico por defecto.
+    membresia_asignada = "Staff" if rol_asignado == "administrador" else "Basico"
+    
+    nuevo_usuario = models.Usuario(
+        nombre=datos.nombre, 
+        email=correo_limpio, 
+        password=datos.password,
+        rol=rol_asignado,
+        membresia=membresia_asignada # <- NUEVO
+    )
+    db.add(nuevo_usuario)
+    db.commit()
+    db.refresh(nuevo_usuario)
+    
+    return {"mensaje": "Usuario creado", "usuario": {"nombre": nuevo_usuario.nombre}}
+
+# 5. ACTUALIZADO: Endpoint de Login conectado a la base de datos
+@app.post("/login")
+def validar_login(datos: LoginData, db: Session = Depends(get_db)):
+    correo_limpio = datos.email.lower().strip()
+    
+    usuario = db.query(models.Usuario).filter(
+        models.Usuario.email == correo_limpio,
+        models.Usuario.password == datos.password
+    ).first()
+    
+    if usuario:
+        return {
+            "mensaje": "Login exitoso", 
+            "usuario": {
+                "id": usuario.id, 
+                "nombre": usuario.nombre, 
+                "rol": usuario.rol,
+                "membresia": usuario.membresia # <- NUEVO: La App ahora sabrá el plan del usuario
+            }
+        }
+    
+    raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
+
+# 6. Estructura para recibir datos de una nueva clase
+class ClaseData(BaseModel):
+    nombre: str
+    fecha: str
+    hora: str
+    cupo_maximo: int
+    profesor_id: int
+    nivel_requerido: str # <- NUEVO
+
+# 7. Endpoint para crear una clase nueva (Esto lo usará el Admin/Profesor)
+@app.post("/clases")
+def crear_clase(datos: ClaseData, db: Session = Depends(get_db)):
+    nueva_clase = models.Clase(
+        nombre=datos.nombre,
+        fecha=datos.fecha,
+        hora=datos.hora,
+        cupo_maximo=datos.cupo_maximo,
+        profesor_id=datos.profesor_id,
+        nivel_requerido=datos.nivel_requerido
+    )
+    db.add(nueva_clase)
+    db.commit()
+    db.refresh(nueva_clase)
+    return {"mensaje": "Clase creada exitosamente", "clase": nueva_clase}
+
+# 8. Endpoint para que la app lea todas las clases disponibles
+# Modificamos para traer el nombre del profesor directamente
+@app.get("/clases")
+def obtener_clases(db: Session = Depends(get_db)):
+    resultados = db.query(
+        models.Clase, 
+        models.Usuario.nombre.label("profesor_nombre")
+    ).outerjoin(models.Usuario, models.Clase.profesor_id == models.Usuario.id).all()
+    
+    respuesta = []
+    for clase, nombre_profe in resultados:
+        respuesta.append({
+            "id": clase.id,
+            "nombre": clase.nombre,
+            "fecha": clase.fecha,
+            "hora": clase.hora,
+            "cupo_maximo": clase.cupo_maximo,
+            "profesor_id": clase.profesor_id,
+            "profesor_nombre": nombre_profe or "Sin asignar",
+            "nivel_requerido": clase.nivel_requerido # <- NUEVO
+        })
+    return respuesta
+
+# Nuevo endpoint para editar datos de la clase (como el profesor)
+@app.put("/clases/{clase_id}")
+def actualizar_clase(clase_id: int, datos: dict, db: Session = Depends(get_db)):
+    clase = db.query(models.Clase).filter(models.Clase.id == clase_id).first()
+    if not clase:
+        raise HTTPException(status_code=404, detail="Clase no encontrada")
+    
+    for clave, valor in datos.items():
+        if hasattr(clase, clave):
+            setattr(clase, clave, valor)
+            
+    db.commit()
+    return {"mensaje": "Clase actualizada correctamente"}
+
+# Endpoint para guardar la reserva
+@app.post("/reservas")
+def agendar_clase(datos: ReservaData, db: Session = Depends(get_db)):
+    # 1. Buscar la clase y al usuario (¡Nuevo: Necesitamos al usuario para saber su membresía!)
+    clase = db.query(models.Clase).filter(models.Clase.id == datos.clase_id).first()
+    usuario = db.query(models.Usuario).filter(models.Usuario.id == datos.usuario_id).first()
+    
+    if not clase:
+        raise HTTPException(status_code=404, detail="Clase no encontrada")
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    # --- NUEVA LÓGICA DE JERARQUÍA DE MEMBRESÍAS ---
+    # Le damos un valor numérico a cada nivel para poder compararlos
+    jerarquia = {"Basico": 1, "Intermedio": 2, "Premium": 3, "Staff": 99}
+    
+    nivel_alumno = jerarquia.get(usuario.membresia, 1) # Si no tiene, asume 1 (Basico)
+    nivel_clase = jerarquia.get(clase.nivel_requerido, 1) # Si la clase no tiene, asume 1 (Basico)
+    
+    # Si el número del alumno es menor al número que exige la clase, lo bloqueamos
+    if nivel_alumno < nivel_clase:
+        raise HTTPException(
+            status_code=400, # Usamos 400 para que tu app de Flutter muestre la alerta naranja
+            detail=f"Tu plan ({usuario.membresia}) no te permite agendar clases de nivel {clase.nivel_requerido}."
+        )
+    # ------------------------------------------------
+
+    # 2. Contar cuántos alumnos ya están inscritos
+    total_inscritos = db.query(models.Reserva).filter(models.Reserva.clase_id == datos.clase_id).count()
+    
+    # 3. ¡Bloquear si está llena!
+    if total_inscritos >= clase.cupo_maximo:
+        raise HTTPException(status_code=400, detail="¡Lo sentimos! Esta clase ya está llena")
+
+    # 4. Verificar si el alumno ya la tenía reservada
+    reserva_existente = db.query(models.Reserva).filter(
+        models.Reserva.usuario_id == datos.usuario_id,
+        models.Reserva.clase_id == datos.clase_id
+    ).first()
+    
+    if reserva_existente:
+        raise HTTPException(status_code=400, detail="Ya tienes agendada esta clase")
+        
+    # 5. Si pasa todas las pruebas, lo inscribimos
+    nueva_reserva = models.Reserva(usuario_id=datos.usuario_id, clase_id=datos.clase_id)
+    db.add(nueva_reserva)
+    db.commit()
+    return {"mensaje": "¡Clase agendada con éxito!"}
+
+# Endpoint para ver las clases reservadas por un usuario específico
+@app.get("/mis-clases/{usuario_id}")
+def obtener_mis_clases(usuario_id: int, db: Session = Depends(get_db)):
+    # Buscamos en la tabla Clases, uniendo con Reservas donde el usuario coincida
+    clases = db.query(models.Clase).join(models.Reserva).filter(
+        models.Reserva.usuario_id == usuario_id
+    ).all()
+    return clases
+
+# Endpoint para que el Admin vea la lista de alumnos de una clase
+@app.get("/clases/{clase_id}/asistentes")
+def obtener_asistentes(clase_id: int, db: Session = Depends(get_db)):
+    # Unimos la tabla Usuarios con la tabla Reservas
+    asistentes = db.query(models.Usuario).join(models.Reserva).filter(
+        models.Reserva.clase_id == clase_id
+    ).all()
+    return asistentes
+
+# 1. Estructuras de datos para las nuevas funciones
+class NuevoProfesor(BaseModel):
+    nombre: str
+    email: str
+    password: str
+
+class ActualizarMembresia(BaseModel):
+    membresia: str
+
+# 2. Endpoint para que el Admin registre a un Profesor
+@app.post("/crear-profesor")
+def registrar_profesor(datos: NuevoProfesor, db: Session = Depends(get_db)):
+    correo_limpio = datos.email.lower().strip()
+    if db.query(models.Usuario).filter(models.Usuario.email == correo_limpio).first():
+        raise HTTPException(status_code=400, detail="El correo ya pertenece a alguien")
+    
+    nuevo_profesor = models.Usuario(
+        nombre=datos.nombre,
+        email=correo_limpio,
+        password=datos.password,
+        rol="profesor", # Rol con poder para crear clases
+        membresia="Staff" # No necesita pagar plan
+    )
+    db.add(nuevo_profesor)
+    db.commit()
+    return {"mensaje": "Profesor registrado con éxito"}
+
+# 3. Endpoint para ver a todos los alumnos y sus planes
+@app.get("/alumnos")
+def obtener_alumnos(db: Session = Depends(get_db)):
+    # Traemos solo a los clientes para que el admin les gestione la membresía
+    return db.query(models.Usuario).filter(models.Usuario.rol == "cliente").all()
+
+# 4. Endpoint para cambiarle el plan a un alumno (Básico -> Premium, etc.)
+@app.put("/usuarios/{usuario_id}/membresia")
+def asignar_membresia(usuario_id: int, datos: ActualizarMembresia, db: Session = Depends(get_db)):
+    usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    usuario.membresia = datos.membresia
+    db.commit()
+    return {"mensaje": f"Membresía actualizada a {datos.membresia}"}
+
+# --- ADMIN: GESTIÓN DE PROFESORES ---
+
+# Ver todos los profesores registrados
+@app.get("/profesores")
+def obtener_profesores(db: Session = Depends(get_db)):
+    return db.query(models.Usuario).filter(models.Usuario.rol == "profesor").all()
+
+# Actualizar datos de cualquier usuario (incluyendo el rol o membresía)
+@app.put("/usuarios/{usuario_id}")
+def actualizar_usuario(usuario_id: int, datos: dict, db: Session = Depends(get_db)):
+    usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    # Actualizamos dinámicamente solo lo que nos envíen
+    for clave, valor in datos.items():
+        if hasattr(usuario, clave):
+            setattr(usuario, clave, valor)
+            
+    db.commit()
+    return {"mensaje": "Información actualizada correctamente"}
+
+# --- CLIENTE: CANCELAR RESERVA ---
+
+@app.delete("/reservas/{usuario_id}/{clase_id}")
+def cancelar_reserva(
+    usuario_id: int, 
+    clase_id: int, 
+    background_tasks: BackgroundTasks, # <- NUEVO: Pedimos el gestor de tareas
+    db: Session = Depends(get_db)
+):
+    reserva = db.query(models.Reserva).filter(
+        models.Reserva.usuario_id == usuario_id,
+        models.Reserva.clase_id == clase_id
+    ).first()
+    
+    if not reserva:
+        raise HTTPException(status_code=404, detail="No se encontró la reserva")
+        
+    db.delete(reserva)
+    db.commit()
+
+    # --- LÓGICA DE NOTIFICACIÓN ---
+    # Buscamos la clase para saber su nombre y quién es el profesor
+    clase = db.query(models.Clase).filter(models.Clase.id == clase_id).first()
+    if clase and clase.profesor_id:
+        profesor = db.query(models.Usuario).filter(models.Usuario.id == clase.profesor_id).first()
+        alumno = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
+        
+        if profesor and alumno:
+            # Mandamos a ejecutar el correo en segundo plano
+            background_tasks.add_task(
+                simular_envio_correo,
+                profesor.email,
+                "⚠️ Cupo liberado en tu clase",
+                f"El alumno {alumno.nombre} ha cancelado su asistencia a '{clase.nombre}'. El cupo está disponible nuevamente en el sistema."
+            )
+
+    return {"mensaje": "Reserva cancelada y cupo liberado"}
+
+@app.delete("/clases/{clase_id}")
+def eliminar_clase(clase_id: int, db: Session = Depends(get_db)):
+    clase = db.query(models.Clase).filter(models.Clase.id == clase_id).first()
+    if not clase:
+        raise HTTPException(status_code=404, detail="Clase no encontrada")
+    
+    # IMPORTANTE: Al borrar la clase, borramos también sus reservas
+    db.query(models.Reserva).filter(models.Reserva.clase_id == clase_id).delete()
+    
+    db.delete(clase)
+    db.commit()
+    return {"mensaje": "Clase eliminada exitosamente"}
+
+
+
+# --- SIMULADOR DE NOTIFICACIONES ---
+def simular_envio_correo(destinatario: str, asunto: str, mensaje: str):
+    # En el futuro, aquí conectarías SendGrid, AWS SES o Twilio (WhatsApp)
+    print("\n" + "="*50)
+    print(f"📧 [SISTEMA DE ALERTAS] Enviando correo...")
+    print(f"Para: {destinatario}")
+    print(f"Asunto: {asunto}")
+    print(f"Mensaje: {mensaje}")
+    print("✔️ Enviado con éxito.")
+    print("="*50 + "\n")
