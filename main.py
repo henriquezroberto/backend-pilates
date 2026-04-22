@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import models
 from database import engine, SessionLocal
-from typing import Optional
+from typing import List, Optional  # <--- ASEGÚRATE DE QUE ESTÉ "Optional"
 
 # NUEVO MOLDE PARA EDITAR PROFESOR
 class DatosProfesor(BaseModel):
@@ -117,21 +117,27 @@ def crear_clase(datos: ClaseData, db: Session = Depends(get_db)):
 # 1. Actualización para ver el nombre del profesor en la lista general
 @app.get("/clases")
 def obtener_clases(db: Session = Depends(get_db)):
-    clases = db.query(models.Clase).all()
-    resultado = []
-    for c in clases:
-        profesor = db.query(models.Profesor).filter(models.Profesor.id == c.profesor_id).first()
-        resultado.append({
-            "id": c.id,
-            "nombre": c.nombre,
-            "fecha": c.fecha,
-            "hora": c.hora,
-            "cupo_maximo": c.cupo_maximo,
-            "nivel_requerido": c.nivel_requerido,
-            "profesor_id": c.profesor_id,
-            "profesor_nombre": profesor.nombre if profesor else "Por asignar"
-        })
-    return resultado
+    try:
+        clases = db.query(models.Clase).all()
+        resultado = []
+        for c in clases:
+            # Buscamos al profesor, pero con cuidado por si no existe
+            profesor = db.query(models.Profesor).filter(models.Profesor.id == c.profesor_id).first()
+            
+            resultado.append({
+                "id": c.id,
+                "nombre": c.nombre,
+                "fecha": c.fecha,
+                "hora": c.hora,
+                "cupo_maximo": c.cupo_maximo,
+                "nivel_requerido": c.nivel_requerido,
+                "profesor_id": c.profesor_id,
+                "profesor_nombre": profesor.nombre if profesor else "Por asignar"
+            })
+        return resultado
+    except Exception as e:
+        print(f"Error al listar clases: {e}")
+        raise HTTPException(status_code=500, detail="Error al obtener la lista de clases")
 
 # Nuevo endpoint para editar datos de la clase (como el profesor)
 @app.put("/clases/{clase_id}")
@@ -316,13 +322,18 @@ def actualizar_profesor(profesor_id: int, datos: DatosProfesor, db: Session = De
     if not profesor:
         raise HTTPException(status_code=404, detail="Profesor no encontrado")
     
-    # Ahora usamos el molde seguro
-    if datos.nombre: profesor.nombre = datos.nombre
-    if datos.email: profesor.email = datos.email
-    if datos.especialidad: profesor.especialidad = datos.especialidad
+    # Actualización segura: solo cambia lo que realmente enviamos
+    if datos.nombre is not None: profesor.nombre = datos.nombre
+    if datos.email is not None: profesor.email = datos.email
+    if datos.especialidad is not None: profesor.especialidad = datos.especialidad
     
-    db.commit()
-    return {"mensaje": "Profesor actualizado correctamente"}
+    try:
+        db.commit()
+        db.refresh(profesor)
+        return {"mensaje": "Profesor actualizado correctamente"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error de base de datos: {str(e)}")
 # --- CLIENTE: CANCELAR RESERVA ---
 
 @app.delete("/reservas/{usuario_id}/{clase_id}")
