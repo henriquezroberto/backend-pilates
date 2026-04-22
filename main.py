@@ -3,6 +3,13 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import models
 from database import engine, SessionLocal
+from typing import Optional
+
+# NUEVO MOLDE PARA EDITAR PROFESOR
+class DatosProfesor(BaseModel):
+    nombre: Optional[str] = None
+    email: Optional[str] = None
+    especialidad: Optional[str] = None
 
 # 1. ¡La magia! Esta línea crea el archivo de la base de datos y las tablas automáticamente
 models.Base.metadata.create_all(bind=engine)
@@ -107,26 +114,24 @@ def crear_clase(datos: ClaseData, db: Session = Depends(get_db)):
 
 # 8. Endpoint para que la app lea todas las clases disponibles
 # Modificamos para traer el nombre del profesor directamente
+# 1. Actualización para ver el nombre del profesor en la lista general
 @app.get("/clases")
 def obtener_clases(db: Session = Depends(get_db)):
-    resultados = db.query(
-        models.Clase, 
-        models.Usuario.nombre.label("profesor_nombre")
-    ).outerjoin(models.Usuario, models.Clase.profesor_id == models.Usuario.id).all()
-    
-    respuesta = []
-    for clase, nombre_profe in resultados:
-        respuesta.append({
-            "id": clase.id,
-            "nombre": clase.nombre,
-            "fecha": clase.fecha,
-            "hora": clase.hora,
-            "cupo_maximo": clase.cupo_maximo,
-            "profesor_id": clase.profesor_id,
-            "profesor_nombre": nombre_profe or "Sin asignar",
-            "nivel_requerido": clase.nivel_requerido # <- NUEVO
+    clases = db.query(models.Clase).all()
+    resultado = []
+    for c in clases:
+        profesor = db.query(models.Profesor).filter(models.Profesor.id == c.profesor_id).first()
+        resultado.append({
+            "id": c.id,
+            "nombre": c.nombre,
+            "fecha": c.fecha,
+            "hora": c.hora,
+            "cupo_maximo": c.cupo_maximo,
+            "nivel_requerido": c.nivel_requerido,
+            "profesor_id": c.profesor_id,
+            "profesor_nombre": profesor.nombre if profesor else "Por asignar"
         })
-    return respuesta
+    return resultado
 
 # Nuevo endpoint para editar datos de la clase (como el profesor)
 @app.put("/clases/{clase_id}")
@@ -191,14 +196,40 @@ def agendar_clase(datos: ReservaData, db: Session = Depends(get_db)):
     db.commit()
     return {"mensaje": "¡Clase agendada con éxito!"}
 
-# Endpoint para ver las clases reservadas por un usuario específico
+# 2. Actualización para que el profesor vea SU resumen en "Mis Clases"
 @app.get("/mis-clases/{usuario_id}")
 def obtener_mis_clases(usuario_id: int, db: Session = Depends(get_db)):
-    # Buscamos en la tabla Clases, uniendo con Reservas donde el usuario coincida
-    clases = db.query(models.Clase).join(models.Reserva).filter(
-        models.Reserva.usuario_id == usuario_id
-    ).all()
-    return clases
+    usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
+    if not usuario:
+        return []
+    
+    resultado = []
+    if usuario.rol == 'profesor':
+        # Buscamos al profesor ignorando mayúsculas/minúsculas en el correo (.ilike)
+        profesor = db.query(models.Profesor).filter(models.Profesor.email.ilike(usuario.email)).first()
+        if not profesor:
+            return [] # Si los correos no coinciden, saldrá vacío
+        
+        clases = db.query(models.Clase).filter(models.Clase.profesor_id == profesor.id).all()
+        for c in clases:
+            resultado.append({
+                "id": c.id, "nombre": c.nombre, "fecha": c.fecha, "hora": c.hora, 
+                "nivel_requerido": c.nivel_requerido, "profesor_nombre": profesor.nombre
+            })
+    else:
+        # Lógica de alumnos
+        reservas = db.query(models.Reserva).filter(models.Reserva.usuario_id == usuario_id).all()
+        for r in reservas:
+            clase = db.query(models.Clase).filter(models.Clase.id == r.clase_id).first()
+            if clase:
+                prof = db.query(models.Profesor).filter(models.Profesor.id == clase.profesor_id).first()
+                resultado.append({
+                    "id": clase.id, "nombre": clase.nombre, "fecha": clase.fecha, "hora": clase.hora, 
+                    "nivel_requerido": clase.nivel_requerido, 
+                    "profesor_nombre": prof.nombre if prof else "Por asignar"
+                })
+                
+    return resultado
 
 # Endpoint para que el Admin vea la lista de alumnos de una clase
 @app.get("/clases/{clase_id}/asistentes")
@@ -275,6 +306,23 @@ def actualizar_usuario(usuario_id: int, datos: dict, db: Session = Depends(get_d
     db.commit()
     return {"mensaje": "Información actualizada correctamente"}
 
+
+
+# NUEVO: Actualizar todos los datos del profesor
+# --- SOLUCIÓN PUNTO 4: ACTUALIZAR PROFESOR CON MOLDE EXACTO ---
+@app.put("/profesores/{profesor_id}")
+def actualizar_profesor(profesor_id: int, datos: DatosProfesor, db: Session = Depends(get_db)):
+    profesor = db.query(models.Profesor).filter(models.Profesor.id == profesor_id).first()
+    if not profesor:
+        raise HTTPException(status_code=404, detail="Profesor no encontrado")
+    
+    # Ahora usamos el molde seguro
+    if datos.nombre: profesor.nombre = datos.nombre
+    if datos.email: profesor.email = datos.email
+    if datos.especialidad: profesor.especialidad = datos.especialidad
+    
+    db.commit()
+    return {"mensaje": "Profesor actualizado correctamente"}
 # --- CLIENTE: CANCELAR RESERVA ---
 
 @app.delete("/reservas/{usuario_id}/{clase_id}")
