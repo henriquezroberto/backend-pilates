@@ -9,7 +9,7 @@ from typing import List, Optional  # <--- ASEGÚRATE DE QUE ESTÉ "Optional"
 class DatosProfesor(BaseModel):
     nombre: Optional[str] = None
     email: Optional[str] = None
-    especialidad: Optional[str] = None
+    especialidad: Optional[str] = None # Flutter lo envía, pero lo ignoraremos en la BD por ahora
 
 # 1. ¡La magia! Esta línea crea el archivo de la base de datos y las tablas automáticamente
 models.Base.metadata.create_all(bind=engine)
@@ -121,8 +121,8 @@ def obtener_clases(db: Session = Depends(get_db)):
         clases = db.query(models.Clase).all()
         resultado = []
         for c in clases:
-            # Buscamos al profesor, pero con cuidado por si no existe
-            profesor = db.query(models.Profesor).filter(models.Profesor.id == c.profesor_id).first()
+            # Buscamos al profesor en la tabla de Usuarios
+            profesor = db.query(models.Usuario).filter(models.Usuario.id == c.profesor_id).first()
             
             resultado.append({
                 "id": c.id,
@@ -203,6 +203,7 @@ def agendar_clase(datos: ReservaData, db: Session = Depends(get_db)):
     return {"mensaje": "¡Clase agendada con éxito!"}
 
 # 2. Actualización para que el profesor vea SU resumen en "Mis Clases"
+# --- 3. MIS CLASES (Lógica ultra-optimizada) ---
 @app.get("/mis-clases/{usuario_id}")
 def obtener_mis_clases(usuario_id: int, db: Session = Depends(get_db)):
     usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
@@ -211,24 +212,19 @@ def obtener_mis_clases(usuario_id: int, db: Session = Depends(get_db)):
     
     resultado = []
     if usuario.rol == 'profesor':
-        # Buscamos al profesor ignorando mayúsculas/minúsculas en el correo (.ilike)
-        profesor = db.query(models.Profesor).filter(models.Profesor.email.ilike(usuario.email)).first()
-        if not profesor:
-            return [] # Si los correos no coinciden, saldrá vacío
-        
-        clases = db.query(models.Clase).filter(models.Clase.profesor_id == profesor.id).all()
+        # ¡Como hay una sola tabla, el ID del profesor es exactamente su ID de usuario!
+        clases = db.query(models.Clase).filter(models.Clase.profesor_id == usuario.id).all()
         for c in clases:
             resultado.append({
                 "id": c.id, "nombre": c.nombre, "fecha": c.fecha, "hora": c.hora, 
-                "nivel_requerido": c.nivel_requerido, "profesor_nombre": profesor.nombre
+                "nivel_requerido": c.nivel_requerido, "profesor_nombre": usuario.nombre
             })
     else:
-        # Lógica de alumnos
         reservas = db.query(models.Reserva).filter(models.Reserva.usuario_id == usuario_id).all()
         for r in reservas:
             clase = db.query(models.Clase).filter(models.Clase.id == r.clase_id).first()
             if clase:
-                prof = db.query(models.Profesor).filter(models.Profesor.id == clase.profesor_id).first()
+                prof = db.query(models.Usuario).filter(models.Usuario.id == clase.profesor_id).first()
                 resultado.append({
                     "id": clase.id, "nombre": clase.nombre, "fecha": clase.fecha, "hora": clase.hora, 
                     "nivel_requerido": clase.nivel_requerido, 
@@ -316,16 +312,17 @@ def actualizar_usuario(usuario_id: int, datos: dict, db: Session = Depends(get_d
 
 # NUEVO: Actualizar todos los datos del profesor
 # --- SOLUCIÓN PUNTO 4: ACTUALIZAR PROFESOR CON MOLDE EXACTO ---
+# --- 2. EDITAR PROFESOR (Buscamos en la tabla Usuario) ---
 @app.put("/profesores/{profesor_id}")
 def actualizar_profesor(profesor_id: int, datos: DatosProfesor, db: Session = Depends(get_db)):
-    profesor = db.query(models.Profesor).filter(models.Profesor.id == profesor_id).first()
+    # Buscamos que el usuario exista y sea profesor
+    profesor = db.query(models.Usuario).filter(models.Usuario.id == profesor_id, models.Usuario.rol == 'profesor').first()
     if not profesor:
         raise HTTPException(status_code=404, detail="Profesor no encontrado")
     
-    # Actualización segura: solo cambia lo que realmente enviamos
     if datos.nombre is not None: profesor.nombre = datos.nombre
     if datos.email is not None: profesor.email = datos.email
-    if datos.especialidad is not None: profesor.especialidad = datos.especialidad
+    # Nota: No actualizamos 'especialidad' porque no existe en tu tabla de Base de Datos
     
     try:
         db.commit()
