@@ -274,6 +274,41 @@ def registrar_profesor(datos: NuevoProfesor, db: Session = Depends(get_db)):
     db.commit()
     return {"mensaje": "Profesor registrado con éxito"}
 
+@app.post("/reservar")
+def reservar_clase(reserva: ReservaCreate, db: Session = Depends(get_db)):
+    usuario = db.query(models.Usuario).filter(models.Usuario.id == reserva.usuario_id).first()
+    clase = db.query(models.Clase).filter(models.Clase.id == reserva.clase_id).first()
+    
+    # 1. Validaciones básicas
+    if not usuario or not clase:
+        raise HTTPException(status_code=404, detail="No existe el usuario o la clase")
+    
+    # 2. VALIDACIÓN DE BILLETERA
+    # ¿Tiene un plan activo?
+    if not usuario.fecha_vencimiento_plan:
+        raise HTTPException(status_code=400, detail="No tienes un plan activo. ¡Contrata uno para agendar!")
+    
+    # ¿El plan venció?
+    fecha_venc = datetime.strptime(usuario.fecha_vencimiento_plan, "%Y-%m-%d")
+    if datetime.now() > fecha_venc:
+        raise HTTPException(status_code=400, detail="Tu plan ha vencido. ¡Renúevalo para seguir entrenando!")
+    
+    # ¿Le quedan clases? (Si es 999 es ilimitado)
+    if usuario.clases_restantes <= 0 and usuario.clases_restantes != 999:
+        raise HTTPException(status_code=400, detail="No te quedan clases en tu saldo mensual.")
+
+    # 3. Registrar reserva y descontar clase
+    nueva_reserva = models.Reserva(usuario_id=reserva.usuario_id, clase_id=reserva.clase_id)
+    db.add(nueva_reserva)
+    
+    # Descontamos la clase del saldo si no es un plan ilimitado
+    if usuario.clases_restantes != 999:
+        usuario.clases_restantes -= 1
+        
+    db.commit()
+    return {"mensaje": "Reserva exitosa", "clases_restantes": usuario.clases_restantes}
+
+
 # 3. Endpoint para ver a todos los alumnos y sus planes
 @app.get("/alumnos")
 def obtener_alumnos(db: Session = Depends(get_db)):
