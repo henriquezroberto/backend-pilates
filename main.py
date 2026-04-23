@@ -39,6 +39,11 @@ class DatosAdmin(BaseModel):
     email: str
     password: str
 
+class DatosRegistro(BaseModel):
+    nombre: str
+    email: str
+    password: str
+
 class ReservaCreate(BaseModel):
     usuario_id: int
     clase_id: int
@@ -91,29 +96,26 @@ app = FastAPI(title="API Centro Pilates", lifespan=lifespan)
 
 # 4. NUEVO: Endpoint para registrar un usuario
 @app.post("/registro")
-def registrar_usuario(datos: RegistroData, db: Session = Depends(get_db)):
-    correo_limpio = datos.email.lower().strip()
-    
-    usuario_existente = db.query(models.Usuario).filter(models.Usuario.email == correo_limpio).first()
+def registrar_usuario(datos: DatosRegistro, db: Session = Depends(get_db)):
+    usuario_existente = db.query(models.Usuario).filter(models.Usuario.email == datos.email).first()
     if usuario_existente:
         raise HTTPException(status_code=400, detail="El correo ya está registrado")
     
-    rol_asignado = "administrador" if correo_limpio == "admin@pilates.com" else "cliente"
-    # Si es el jefe, es Staff. Si es alumno nuevo, entra como Básico por defecto.
-    membresia_asignada = "Staff" if rol_asignado == "administrador" else "Basico"
-    
+    # Hemos quitado la línea de 'membresia'
     nuevo_usuario = models.Usuario(
-        nombre=datos.nombre, 
-        email=correo_limpio, 
-        password=datos.password,
-        rol=rol_asignado,
-        membresia=membresia_asignada # <- NUEVO
+        nombre=datos.nombre,
+        email=datos.email,
+        password=datos.password, 
+        rol="cliente"
     )
-    db.add(nuevo_usuario)
-    db.commit()
-    db.refresh(nuevo_usuario)
     
-    return {"mensaje": "Usuario creado", "usuario": {"nombre": nuevo_usuario.nombre}}
+    db.add(nuevo_usuario)
+    try:
+        db.commit()
+        return {"mensaje": "Usuario registrado exitosamente"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error al crear el usuario")
 
 # 5. ACTUALIZADO: Endpoint de Login conectado a la base de datos
 @app.post("/login")
@@ -436,18 +438,16 @@ def eliminar_clase(clase_id: int, db: Session = Depends(get_db)):
 # --- NUEVO: CREAR ADMINISTRADOR ---
 @app.post("/crear-admin")
 def crear_administrador(datos: DatosAdmin, db: Session = Depends(get_db)):
-    # 1. Verificamos que el correo no esté usado
     usuario_existente = db.query(models.Usuario).filter(models.Usuario.email == datos.email).first()
     if usuario_existente:
         raise HTTPException(status_code=400, detail="El correo ya está registrado")
     
-    # 2. Creamos al usuario forzando el rol de 'administrador'
+    # Hemos quitado la línea de 'membresia="Staff"'
     nuevo_admin = models.Usuario(
         nombre=datos.nombre,
         email=datos.email,
         password=datos.password, 
-        rol="administrador",
-        membresia="Staff"
+        rol="administrador"
     )
     
     db.add(nuevo_admin)
