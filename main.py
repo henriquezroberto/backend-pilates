@@ -141,15 +141,16 @@ def validar_login(datos: LoginData, db: Session = Depends(get_db)):
     raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
 
 # 6. Estructura para recibir datos de una nueva clase
+# 6. Estructura para recibir datos de una nueva clase
 class ClaseData(BaseModel):
     nombre: str
     fecha: str
     hora: str
     cupo_maximo: int
     profesor_id: int
-    nivel_requerido: str # <- NUEVO
+    disciplina: str = "General" # <- Cambiamos nivel_requerido por disciplina
 
-# 7. Endpoint para crear una clase nueva (Esto lo usará el Admin/Profesor)
+# 7. Endpoint para crear una clase nueva
 @app.post("/clases")
 def crear_clase(datos: ClaseData, db: Session = Depends(get_db)):
     nueva_clase = models.Clase(
@@ -158,7 +159,7 @@ def crear_clase(datos: ClaseData, db: Session = Depends(get_db)):
         hora=datos.hora,
         cupo_maximo=datos.cupo_maximo,
         profesor_id=datos.profesor_id,
-        nivel_requerido=datos.nivel_requerido
+        disciplina=datos.disciplina # <- Corregido aquí
     )
     db.add(nueva_clase)
     db.commit()
@@ -183,7 +184,7 @@ def obtener_clases(db: Session = Depends(get_db)):
                 "fecha": c.fecha,
                 "hora": c.hora,
                 "cupo_maximo": c.cupo_maximo,
-                "nivel_requerido": c.nivel_requerido,
+                "disciplina": c.disciplina,
                 "profesor_id": c.profesor_id,
                 "profesor_nombre": profesor.nombre if profesor else "Por asignar"
             })
@@ -222,7 +223,7 @@ def obtener_mis_clases(usuario_id: int, db: Session = Depends(get_db)):
         for c in clases:
             resultado.append({
                 "id": c.id, "nombre": c.nombre, "fecha": c.fecha, "hora": c.hora, 
-                "nivel_requerido": c.nivel_requerido, "profesor_nombre": usuario.nombre
+                "disciplina": c.disciplina, "profesor_nombre": usuario.nombre
             })
     else:
         reservas = db.query(models.Reserva).filter(models.Reserva.usuario_id == usuario_id).all()
@@ -232,7 +233,7 @@ def obtener_mis_clases(usuario_id: int, db: Session = Depends(get_db)):
                 prof = db.query(models.Usuario).filter(models.Usuario.id == clase.profesor_id).first()
                 resultado.append({
                     "id": clase.id, "nombre": clase.nombre, "fecha": clase.fecha, "hora": clase.hora, 
-                    "nivel_requerido": clase.nivel_requerido, 
+                    "disciplina": clase.disciplina, 
                     "profesor_nombre": prof.nombre if prof else "Por asignar"
                 })
                 
