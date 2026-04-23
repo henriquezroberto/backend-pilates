@@ -510,6 +510,30 @@ def reservar_clase(reserva: ReservaCreate, db: Session = Depends(get_db)):
     db.commit()
     return {"mensaje": "Reserva exitosa", "clases_restantes": usuario.clases_restantes}
 
+@app.get("/alumnos")
+def obtener_alumnos(db: Session = Depends(get_db)):
+    # Filtramos solo por el rol de 'cliente'
+    alumnos = db.query(models.Usuario).filter(models.Usuario.rol == 'cliente').all()
+    resultado = []
+    for a in alumnos:
+        # Buscamos el nombre del plan si tiene uno asignado
+        plan_nombre = "Sin Plan Activo"
+        if a.plan_id:
+            plan = db.query(models.Plan).filter(models.Plan.id == a.plan_id).first()
+            if plan:
+                plan_nombre = plan.nombre
+        
+        resultado.append({
+            "id": a.id,
+            "nombre": a.nombre,
+            "email": a.email,
+            "plan_nombre": plan_nombre,
+            "clases_restantes": a.clases_restantes,
+            "fecha_vencimiento": a.fecha_vencimiento_plan or "N/A"
+        })
+    return resultado
+
+
 # --- SIMULADOR DE NOTIFICACIONES ---
 def simular_envio_correo(destinatario: str, asunto: str, mensaje: str):
     # En el futuro, aquí conectarías SendGrid, AWS SES o Twilio (WhatsApp)
