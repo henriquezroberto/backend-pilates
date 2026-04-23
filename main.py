@@ -134,7 +134,7 @@ def validar_login(datos: LoginData, db: Session = Depends(get_db)):
                 "id": usuario.id, 
                 "nombre": usuario.nombre, 
                 "rol": usuario.rol,
-                "membresia": usuario.membresia # <- NUEVO: La App ahora sabrá el plan del usuario
+                "plan_id": usuario.plan_id # <- Ahora enviamos de forma segura el ID de su plan
             }
         }
     
@@ -206,54 +206,6 @@ def actualizar_clase(clase_id: int, datos: dict, db: Session = Depends(get_db)):
     db.commit()
     return {"mensaje": "Clase actualizada correctamente"}
 
-# Endpoint para guardar la reserva
-@app.post("/reservas")
-def agendar_clase(datos: ReservaData, db: Session = Depends(get_db)):
-    # 1. Buscar la clase y al usuario (¡Nuevo: Necesitamos al usuario para saber su membresía!)
-    clase = db.query(models.Clase).filter(models.Clase.id == datos.clase_id).first()
-    usuario = db.query(models.Usuario).filter(models.Usuario.id == datos.usuario_id).first()
-    
-    if not clase:
-        raise HTTPException(status_code=404, detail="Clase no encontrada")
-    if not usuario:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
-
-    # --- NUEVA LÓGICA DE JERARQUÍA DE MEMBRESÍAS ---
-    # Le damos un valor numérico a cada nivel para poder compararlos
-    jerarquia = {"Basico": 1, "Intermedio": 2, "Premium": 3, "Staff": 99}
-    
-    nivel_alumno = jerarquia.get(usuario.membresia, 1) # Si no tiene, asume 1 (Basico)
-    nivel_clase = jerarquia.get(clase.nivel_requerido, 1) # Si la clase no tiene, asume 1 (Basico)
-    
-    # Si el número del alumno es menor al número que exige la clase, lo bloqueamos
-    if nivel_alumno < nivel_clase:
-        raise HTTPException(
-            status_code=400, # Usamos 400 para que tu app de Flutter muestre la alerta naranja
-            detail=f"Tu plan ({usuario.membresia}) no te permite agendar clases de nivel {clase.nivel_requerido}."
-        )
-    # ------------------------------------------------
-
-    # 2. Contar cuántos alumnos ya están inscritos
-    total_inscritos = db.query(models.Reserva).filter(models.Reserva.clase_id == datos.clase_id).count()
-    
-    # 3. ¡Bloquear si está llena!
-    if total_inscritos >= clase.cupo_maximo:
-        raise HTTPException(status_code=400, detail="¡Lo sentimos! Esta clase ya está llena")
-
-    # 4. Verificar si el alumno ya la tenía reservada
-    reserva_existente = db.query(models.Reserva).filter(
-        models.Reserva.usuario_id == datos.usuario_id,
-        models.Reserva.clase_id == datos.clase_id
-    ).first()
-    
-    if reserva_existente:
-        raise HTTPException(status_code=400, detail="Ya tienes agendada esta clase")
-        
-    # 5. Si pasa todas las pruebas, lo inscribimos
-    nueva_reserva = models.Reserva(usuario_id=datos.usuario_id, clase_id=datos.clase_id)
-    db.add(nueva_reserva)
-    db.commit()
-    return {"mensaje": "¡Clase agendada con éxito!"}
 
 # 2. Actualización para que el profesor vea SU resumen en "Mis Clases"
 # --- 3. MIS CLASES (Lógica ultra-optimizada) ---
@@ -315,8 +267,7 @@ def registrar_profesor(datos: NuevoProfesor, db: Session = Depends(get_db)):
         nombre=datos.nombre,
         email=correo_limpio,
         password=datos.password,
-        rol="profesor", # Rol con poder para crear clases
-        membresia="Staff" # No necesita pagar plan
+        rol="profesor"
     )
     db.add(nuevo_profesor)
     db.commit()
@@ -328,16 +279,6 @@ def obtener_alumnos(db: Session = Depends(get_db)):
     # Traemos solo a los clientes para que el admin les gestione la membresía
     return db.query(models.Usuario).filter(models.Usuario.rol == "cliente").all()
 
-# 4. Endpoint para cambiarle el plan a un alumno (Básico -> Premium, etc.)
-@app.put("/usuarios/{usuario_id}/membresia")
-def asignar_membresia(usuario_id: int, datos: ActualizarMembresia, db: Session = Depends(get_db)):
-    usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
-    if not usuario:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    
-    usuario.membresia = datos.membresia
-    db.commit()
-    return {"mensaje": f"Membresía actualizada a {datos.membresia}"}
 
 # --- ADMIN: GESTIÓN DE PROFESORES ---
 
@@ -475,40 +416,6 @@ def asignar_plan(usuario_id: int, plan_id: int, db: Session = Depends(get_db)):
     
     db.commit()
     return {"mensaje": f"Plan {plan.nombre} asignado hasta {usuario.fecha_vencimiento_plan}"}
-
-@app.post("/reservar")
-def reservar_clase(reserva: ReservaCreate, db: Session = Depends(get_db)):
-    usuario = db.query(models.Usuario).filter(models.Usuario.id == reserva.usuario_id).first()
-    clase = db.query(models.Clase).filter(models.Clase.id == reserva.clase_id).first()
-    
-    # 1. Validaciones básicas
-    if not usuario or not clase:
-        raise HTTPException(status_code=404, detail="No existe el usuario o la clase")
-    
-    # 2. VALIDACIÓN DE BILLETERA
-    # ¿Tiene un plan activo?
-    if not usuario.fecha_vencimiento_plan:
-        raise HTTPException(status_code=400, detail="No tienes un plan activo")
-    
-    # ¿El plan venció?
-    fecha_venc = datetime.strptime(usuario.fecha_vencimiento_plan, "%Y-%m-%d")
-    if datetime.now() > fecha_venc:
-        raise HTTPException(status_code=400, detail="Tu plan ha vencido")
-    
-    # ¿Le quedan clases? (Si es 999 es ilimitado)
-    if usuario.clases_restantes <= 0 and usuario.clases_restantes != 999:
-        raise HTTPException(status_code=400, detail="No te quedan clases disponibles")
-
-    # 3. Registrar reserva y descontar clase
-    nueva_reserva = models.Reserva(usuario_id=reserva.usuario_id, clase_id=reserva.clase_id)
-    db.add(nueva_reserva)
-    
-    # Descontamos si no es ilimitado
-    if usuario.clases_restantes != 999:
-        usuario.clases_restantes -= 1
-        
-    db.commit()
-    return {"mensaje": "Reserva exitosa", "clases_restantes": usuario.clases_restantes}
 
 @app.get("/alumnos")
 def obtener_alumnos(db: Session = Depends(get_db)):
