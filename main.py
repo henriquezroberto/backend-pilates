@@ -4,6 +4,33 @@ from sqlalchemy.orm import Session
 import models
 from database import engine, SessionLocal
 from typing import List, Optional  # <--- ASEGÚRATE DE QUE ESTÉ "Optional"
+from datetime import datetime, timedelta
+
+# Función para crear los planes si la tabla está vacía
+def inicializar_planes(db: Session):
+    if db.query(models.Plan).count() == 0:
+        planes_iniciales = [
+            # Mensuales (30 días)
+            {"nombre": "Mensual Opción 1 (4 clases)", "duracion": 30, "limite": 4},
+            {"nombre": "Mensual Opción 2 (8 clases)", "duracion": 30, "limite": 8},
+            {"nombre": "Mensual Opción 3 (12 clases)", "duracion": 30, "limite": 12},
+            {"nombre": "Mensual Opción 4 (Ilimitado)", "duracion": 30, "limite": 999},
+            # Trimestrales (90 días)
+            {"nombre": "Trimestral Opción 1 (12 clases)", "duracion": 90, "limite": 12},
+            {"nombre": "Trimestral Opción 2 (24 clases)", "duracion": 90, "limite": 24},
+            {"nombre": "Trimestral Opción 3 (36 clases)", "duracion": 90, "limite": 36},
+            {"nombre": "Trimestral Opción 4 (Ilimitado)", "duracion": 90, "limite": 999},
+            # Semestrales (180 días)
+            {"nombre": "Semestral Opción 1 (24 clases)", "duracion": 180, "limite": 24},
+            {"nombre": "Semestral Opción 2 (48 clases)", "duracion": 180, "limite": 48},
+            {"nombre": "Semestral Opción 3 (72 clases)", "duracion": 180, "limite": 72},
+            {"nombre": "Semestral Opción 4 (Ilimitado)", "duracion": 180, "limite": 999},
+        ]
+        for p in planes_iniciales:
+            nuevo_plan = models.Plan(nombre=p["nombre"], duracion_dias=p["duracion"], limite_clases=p["limite"])
+            db.add(nuevo_plan)
+        db.commit()
+
 
 
 # ESTRUCTURAS DE DATOS PARA ADMINISTRADORES
@@ -11,6 +38,10 @@ class DatosAdmin(BaseModel):
     nombre: str
     email: str
     password: str
+
+class ReservaCreate(BaseModel):
+    usuario_id: int
+    clase_id: int
 
 # NUEVO MOLDE PARA EDITAR PROFESOR
 class DatosProfesor(BaseModel):
@@ -21,7 +52,7 @@ class DatosProfesor(BaseModel):
 # 1. ¡La magia! Esta línea crea el archivo de la base de datos y las tablas automáticamente
 models.Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="API Centro Pilates")
+# app = FastAPI(title="API Centro Pilates")  # Reemplazado por la versión con lifespan arriba
 
 # 2. Función auxiliar para abrir y cerrar la conexión a la base de datos en cada petición
 def get_db():
@@ -44,6 +75,19 @@ class RegistroData(BaseModel):
 class ReservaData(BaseModel):
     usuario_id: int
     clase_id: int
+
+# Llama a esta función dentro del evento de inicio usando el nuevo lifespan handler
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    db = SessionLocal()
+    inicializar_planes(db)
+    db.close()
+    yield
+
+app = FastAPI(title="API Centro Pilates", lifespan=lifespan)
+
 
 # 4. NUEVO: Endpoint para registrar un usuario
 @app.post("/registro")
@@ -414,6 +458,57 @@ def crear_administrador(datos: DatosAdmin, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail="Error al crear administrador")
 
+@app.post("/asignar-plan/{usuario_id}/{plan_id}")
+def asignar_plan(usuario_id: int, plan_id: int, db: Session = Depends(get_db)):
+    usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
+    plan = db.query(models.Plan).filter(models.Plan.id == plan_id).first()
+    
+    if not usuario or not plan:
+        raise HTTPException(status_code=404, detail="Usuario o Plan no encontrado")
+    
+    # Calculamos fecha de vencimiento (Hoy + duración del plan)
+    vencimiento = datetime.now() + timedelta(days=plan.duracion_dias)
+    
+    usuario.plan_id = plan.id
+    usuario.clases_restantes = plan.limite_clases
+    usuario.fecha_vencimiento_plan = vencimiento.strftime("%Y-%m-%d")
+    
+    db.commit()
+    return {"mensaje": f"Plan {plan.nombre} asignado hasta {usuario.fecha_vencimiento_plan}"}
+
+@app.post("/reservar")
+def reservar_clase(reserva: ReservaCreate, db: Session = Depends(get_db)):
+    usuario = db.query(models.Usuario).filter(models.Usuario.id == reserva.usuario_id).first()
+    clase = db.query(models.Clase).filter(models.Clase.id == reserva.clase_id).first()
+    
+    # 1. Validaciones básicas
+    if not usuario or not clase:
+        raise HTTPException(status_code=404, detail="No existe el usuario o la clase")
+    
+    # 2. VALIDACIÓN DE BILLETERA
+    # ¿Tiene un plan activo?
+    if not usuario.fecha_vencimiento_plan:
+        raise HTTPException(status_code=400, detail="No tienes un plan activo")
+    
+    # ¿El plan venció?
+    fecha_venc = datetime.strptime(usuario.fecha_vencimiento_plan, "%Y-%m-%d")
+    if datetime.now() > fecha_venc:
+        raise HTTPException(status_code=400, detail="Tu plan ha vencido")
+    
+    # ¿Le quedan clases? (Si es 999 es ilimitado)
+    if usuario.clases_restantes <= 0 and usuario.clases_restantes != 999:
+        raise HTTPException(status_code=400, detail="No te quedan clases disponibles")
+
+    # 3. Registrar reserva y descontar clase
+    nueva_reserva = models.Reserva(usuario_id=reserva.usuario_id, clase_id=reserva.clase_id)
+    db.add(nueva_reserva)
+    
+    # Descontamos si no es ilimitado
+    if usuario.clases_restantes != 999:
+        usuario.clases_restantes -= 1
+        
+    db.commit()
+    return {"mensaje": "Reserva exitosa", "clases_restantes": usuario.clases_restantes}
 
 # --- SIMULADOR DE NOTIFICACIONES ---
 def simular_envio_correo(destinatario: str, asunto: str, mensaje: str):
