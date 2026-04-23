@@ -5,6 +5,13 @@ import models
 from database import engine, SessionLocal
 from typing import List, Optional  # <--- ASEGÚRATE DE QUE ESTÉ "Optional"
 
+
+# ESTRUCTURAS DE DATOS PARA ADMINISTRADORES
+class DatosAdmin(BaseModel):
+    nombre: str
+    email: str
+    password: str
+
 # NUEVO MOLDE PARA EDITAR PROFESOR
 class DatosProfesor(BaseModel):
     nombre: Optional[str] = None
@@ -382,6 +389,30 @@ def eliminar_clase(clase_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"mensaje": "Clase eliminada exitosamente"}
 
+# --- NUEVO: CREAR ADMINISTRADOR ---
+@app.post("/crear-admin")
+def crear_administrador(datos: DatosAdmin, db: Session = Depends(get_db)):
+    # 1. Verificamos que el correo no esté usado
+    usuario_existente = db.query(models.Usuario).filter(models.Usuario.email == datos.email).first()
+    if usuario_existente:
+        raise HTTPException(status_code=400, detail="El correo ya está registrado")
+    
+    # 2. Creamos al usuario forzando el rol de 'administrador'
+    nuevo_admin = models.Usuario(
+        nombre=datos.nombre,
+        email=datos.email,
+        password=datos.password, 
+        rol="administrador",
+        membresia="Staff"
+    )
+    
+    db.add(nuevo_admin)
+    try:
+        db.commit()
+        return {"mensaje": "Administrador creado exitosamente"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error al crear administrador")
 
 
 # --- SIMULADOR DE NOTIFICACIONES ---
