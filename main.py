@@ -279,9 +279,17 @@ def reservar_clase(reserva: ReservaCreate, db: Session = Depends(get_db)):
     usuario = db.query(models.Usuario).filter(models.Usuario.id == reserva.usuario_id).first()
     clase = db.query(models.Clase).filter(models.Clase.id == reserva.clase_id).first()
     
-    # 1. Validaciones básicas
     if not usuario or not clase:
         raise HTTPException(status_code=404, detail="No existe el usuario o la clase")
+
+    # --- NUEVO: SEGURIDAD ANTI-DUPLICADOS ---
+    reserva_previa = db.query(models.Reserva).filter(
+        models.Reserva.usuario_id == reserva.usuario_id,
+        models.Reserva.clase_id == reserva.clase_id
+    ).first()
+    
+    if reserva_previa:
+        raise HTTPException(status_code=400, detail="Ya estás inscrito en esta clase. ¡No gastes tus créditos de más!")
     
     # 2. VALIDACIÓN DE BILLETERA
     # ¿Tiene un plan activo?
