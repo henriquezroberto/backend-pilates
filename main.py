@@ -5,6 +5,7 @@ import models
 from database import engine, SessionLocal
 from typing import List, Optional  # <--- ASEGÚRATE DE QUE ESTÉ "Optional"
 from datetime import datetime, timedelta
+from sqlalchemy import Column, Integer, String, Boolean
 
 # Función para crear los planes si la tabla está vacía
 def inicializar_planes(db: Session):
@@ -92,6 +93,21 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="API Centro Pilates", lifespan=lifespan)
+
+@app.get("/historial/{usuario_id}")
+def obtener_historial(usuario_id: int, db: Session = Depends(get_db)):
+    reservas = db.query(models.Reserva).filter(models.Reserva.usuario_id == usuario_id).all()
+    historial = []
+    for r in reservas:
+        clase = db.query(models.Clase).filter(models.Clase.id == r.clase_id).first()
+        if clase:
+            historial.append({
+                "nombre": clase.nombre,
+                "fecha": clase.fecha,
+                "hora": clase.hora,
+                "disciplina": clase.disciplina
+            })
+    return historial
 
 
 # 4. NUEVO: Endpoint para registrar un usuario
@@ -504,6 +520,28 @@ def obtener_perfil(usuario_id: int, db: Session = Depends(get_db)):
         "clases_restantes": usuario.clases_restantes,
         "fecha_vencimiento": usuario.fecha_vencimiento_plan or "N/A"
     }
+
+# ELIMINAR USUARIO (Alumno, Profesor o Admin)
+@app.delete("/usuarios/{usuario_id}")
+def eliminar_usuario(usuario_id: int, db: Session = Depends(get_db)):
+    # 1. Buscamos al usuario
+    usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    # 2. Limpiamos sus reservas para no dejar basura en la base de datos
+    db.query(models.Reserva).filter(models.Reserva.usuario_id == usuario_id).delete()
+    
+    # (Nota: Si es profesor, las clases que creó seguirán existiendo, 
+    # pero es mejor reasignarlas a otro profesor en el futuro)
+
+    # 3. Borramos al usuario definitivamente
+    db.delete(usuario)
+    db.commit()
+    
+    return {"mensaje": f"Usuario {usuario.nombre} eliminado correctamente del sistema"}
+
+
 
 # --- SIMULADOR DE NOTIFICACIONES ---
 def simular_envio_correo(destinatario: str, asunto: str, mensaje: str):
