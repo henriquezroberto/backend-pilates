@@ -476,6 +476,26 @@ def obtener_alumnos(db: Session = Depends(get_db)):
         })
     return resultado
 
+@app.get("/perfil/{usuario_id}")
+def obtener_perfil(usuario_id: int, db: Session = Depends(get_db)):
+    usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    # Buscamos el nombre del plan
+    plan_nombre = "Sin Plan Activo"
+    if usuario.plan_id:
+        plan = db.query(models.Plan).filter(models.Plan.id == usuario.plan_id).first()
+        if plan:
+            plan_nombre = plan.nombre
+
+    return {
+        "nombre": usuario.nombre,
+        "email": usuario.email,
+        "plan_nombre": plan_nombre,
+        "clases_restantes": usuario.clases_restantes,
+        "fecha_vencimiento": usuario.fecha_vencimiento_plan or "N/A"
+    }
 
 # --- SIMULADOR DE NOTIFICACIONES ---
 def simular_envio_correo(destinatario: str, asunto: str, mensaje: str):
