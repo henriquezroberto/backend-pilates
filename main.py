@@ -109,6 +109,19 @@ def obtener_historial(usuario_id: int, db: Session = Depends(get_db)):
             })
     return historial
 
+@app.put("/quitar-plan/{usuario_id}")
+def quitar_plan(usuario_id: int, db: Session = Depends(get_db)):
+    usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    # Reseteamos los valores a cero/nulo
+    usuario.plan_id = None
+    usuario.clases_restantes = 0
+    usuario.fecha_vencimiento_plan = None
+    
+    db.commit()
+    return {"mensaje": "Plan removido exitosamente"}
 
 # 4. NUEVO: Endpoint para registrar un usuario
 @app.post("/registro")
