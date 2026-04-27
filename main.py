@@ -581,6 +581,28 @@ def eliminar_usuario(usuario_id: int, db: Session = Depends(get_db)):
     return {"mensaje": f"Usuario {usuario.nombre} eliminado correctamente del sistema"}
 
 
+# CAMBIAR ESTADO DE USUARIO (Inactivar / Reactivar)
+@app.put("/usuarios/{usuario_id}/estado")
+def cambiar_estado_usuario(usuario_id: int, db: Session = Depends(get_db)):
+    # Buscamos al usuario
+    usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
+    
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    # Si estaba activo (True), lo pasamos a inactivo (False) y viceversa.
+    usuario.activo = not usuario.activo 
+    
+    # Si lo estamos apagando, le limpiamos las reservas para mayor seguridad
+    if not usuario.activo:
+        db.query(models.Reserva).filter(models.Reserva.usuario_id == usuario_id).delete()
+        
+    db.commit()
+    
+    estado_texto = "Reactivado" if usuario.activo else "Inactivado"
+    return {"mensaje": f"El usuario {usuario.nombre} ha sido {estado_texto}", "activo": usuario.activo}
+
+
 
 # --- SIMULADOR DE NOTIFICACIONES ---
 def simular_envio_correo(destinatario: str, asunto: str, mensaje: str):
