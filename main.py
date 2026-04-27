@@ -135,7 +135,7 @@ def registrar_usuario(datos: DatosRegistro, db: Session = Depends(get_db)):
         nombre=datos.nombre,
         email=datos.email,
         password=datos.password, 
-        rol="cliente"
+        rol="alumno"
     )
     
     db.add(nuevo_usuario)
@@ -349,13 +349,11 @@ def reservar_clase(reserva: ReservaCreate, db: Session = Depends(get_db)):
 # 3. Endpoint para ver a todos los alumnos y sus planes
 @app.get("/alumnos")
 def obtener_alumnos(db: Session = Depends(get_db)):
-    # 1. CAMBIO CLAVE: Traemos a todos los que NO sean "administrador"
-    # Así atrapamos a los alumnos, no importa si se guardaron como "cliente", "alumno" o vacío.
-    usuarios = db.query(models.Usuario).filter(models.Usuario.rol != "administrador").all()
+    # CAMBIO: Filtramos para que solo traiga a quienes tengan el rol "alumno"
+    # Usamos .lower() por seguridad por si alguno se guardó con Mayúscula
+    usuarios = db.query(models.Usuario).filter(models.Usuario.rol == "alumno").all()
     
     resultado = []
-    
-    # 2. Tu diccionario de planes que hicimos antes
     nombres_planes = {
         1: "Mensual 4 Clases", 2: "Mensual 8 Clases", 3: "Mensual 12 Clases", 4: "Mensual Ilimitado",
         5: "Trimestral 12 Clases", 6: "Trimestral 24 Clases", 7: "Trimestral 36 Clases", 8: "Trimestral Ilimitado",
@@ -372,10 +370,8 @@ def obtener_alumnos(db: Session = Depends(get_db)):
             "plan_nombre": plan_nombre,
             "clases_restantes": u.clases_restantes,
             "fecha_vencimiento": u.fecha_vencimiento_plan or "Sin fecha",
-            # Manejamos el caso de que 'activo' sea None en bases de datos viejas
             "activo": u.activo if u.activo is not None else True 
         })
-        
     return resultado
 
 
