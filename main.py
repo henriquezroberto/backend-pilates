@@ -380,7 +380,19 @@ def obtener_alumnos(db: Session = Depends(get_db)):
 # Ver todos los profesores registrados
 @app.get("/profesores")
 def obtener_profesores(db: Session = Depends(get_db)):
-    return db.query(models.Usuario).filter(models.Usuario.rol == "profesor").all()
+    # Buscamos solo a los que tienen el rol de "profesor"
+    profesores = db.query(models.Usuario).filter(models.Usuario.rol == "profesor").all()
+    
+    resultado = []
+    for p in profesores:
+        resultado.append({
+            "id": p.id,
+            "nombre": p.nombre,
+            "email": p.email,
+            # Nos aseguramos de enviar el estado activo
+            "activo": p.activo if p.activo is not None else True 
+        })
+    return resultado
 
 # Actualizar datos de cualquier usuario (incluyendo el rol o membresía)
 @app.put("/usuarios/{usuario_id}")
