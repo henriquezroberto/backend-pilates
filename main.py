@@ -349,8 +349,29 @@ def reservar_clase(reserva: ReservaCreate, db: Session = Depends(get_db)):
 # 3. Endpoint para ver a todos los alumnos y sus planes
 @app.get("/alumnos")
 def obtener_alumnos(db: Session = Depends(get_db)):
-    # Traemos solo a los clientes para que el admin les gestione la membresía
-    return db.query(models.Usuario).filter(models.Usuario.rol == "cliente").all()
+    usuarios = db.query(models.Usuario).filter(models.Usuario.rol == "alumno").all()
+    resultado = []
+    
+    # Diccionario para traducir el ID del plan al Nombre real
+    nombres_planes = {
+        1: "Mensual 4 Clases", 2: "Mensual 8 Clases", 3: "Mensual 12 Clases", 4: "Mensual Ilimitado",
+        5: "Trimestral 12 Clases", 6: "Trimestral 24 Clases", 7: "Trimestral 36 Clases", 8: "Trimestral Ilimitado",
+        9: "Semestral 24 Clases", 10: "Semestral 48 Clases", 11: "Semestral 72 Clases", 12: "Semestral Ilimitado"
+    }
+
+    for u in usuarios:
+        plan_nombre = nombres_planes.get(u.plan_id, "Sin Plan Activo") if u.plan_id else "Sin Plan Activo"
+        
+        resultado.append({
+            "id": u.id,
+            "nombre": u.nombre,
+            "email": u.email,
+            "plan_nombre": plan_nombre,  # Ahora envía el nombre real
+            "clases_restantes": u.clases_restantes,
+            "fecha_vencimiento": u.fecha_vencimiento_plan or "Sin fecha", # Evita el Null
+            "activo": u.activo
+        })
+    return resultado
 
 
 # --- ADMIN: GESTIÓN DE PROFESORES ---
