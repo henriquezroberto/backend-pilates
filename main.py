@@ -182,6 +182,17 @@ class ClaseData(BaseModel):
 # 7. Endpoint para crear una clase nueva
 @app.post("/clases")
 def crear_clase(datos: ClaseData, db: Session = Depends(get_db)):
+    # 1. Buscamos al profesor en la base de datos
+    profe = db.query(models.Usuario).filter(models.Usuario.id == datos.profesor_id).first()
+    
+    # 2. VALIDACIÓN DE SEGURIDAD: Si existe pero está apagado, frenamos todo
+    if profe and not profe.activo:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"El profesor {profe.nombre} está inactivo y no puede dictar clases."
+        )
+
+    # 3. Si pasó la validación, creamos la clase (tu código original)
     nueva_clase = models.Clase(
         nombre=datos.nombre,
         fecha=datos.fecha,
@@ -193,6 +204,7 @@ def crear_clase(datos: ClaseData, db: Session = Depends(get_db)):
     db.add(nueva_clase)
     db.commit()
     db.refresh(nueva_clase)
+    
     return {"mensaje": "Clase creada exitosamente", "clase": nueva_clase}
 
 # 8. Endpoint para que la app lea todas las clases disponibles
