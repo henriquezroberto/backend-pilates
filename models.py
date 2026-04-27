@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey
+from sqlalchemy import Column, Integer, String, ForeignKey, Boolean
 from database import Base
 
 # --- 1. NUEVA TABLA: EL CATÁLOGO DE PLANES ---
@@ -22,7 +22,7 @@ class Usuario(Base):
     plan_id = Column(Integer, ForeignKey("planes.id"), nullable=True)
     fecha_vencimiento_plan = Column(String, nullable=True) # Ej: "2026-05-23"
     clases_restantes = Column(Integer, default=0) # El contador que bajará con cada reserva
-
+    activo = Column(Boolean, default=True)  # Para marcar si el plan está activo o no (si es False, el alumno no puede reservar)
 # --- 3. TABLA CLASES (Se mantiene igual) ---
 class Clase(Base):
     __tablename__ = "clases"
