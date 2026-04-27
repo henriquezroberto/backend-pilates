@@ -349,10 +349,13 @@ def reservar_clase(reserva: ReservaCreate, db: Session = Depends(get_db)):
 # 3. Endpoint para ver a todos los alumnos y sus planes
 @app.get("/alumnos")
 def obtener_alumnos(db: Session = Depends(get_db)):
-    usuarios = db.query(models.Usuario).filter(models.Usuario.rol == "alumno").all()
+    # 1. CAMBIO CLAVE: Traemos a todos los que NO sean "administrador"
+    # Así atrapamos a los alumnos, no importa si se guardaron como "cliente", "alumno" o vacío.
+    usuarios = db.query(models.Usuario).filter(models.Usuario.rol != "administrador").all()
+    
     resultado = []
     
-    # Diccionario para traducir el ID del plan al Nombre real
+    # 2. Tu diccionario de planes que hicimos antes
     nombres_planes = {
         1: "Mensual 4 Clases", 2: "Mensual 8 Clases", 3: "Mensual 12 Clases", 4: "Mensual Ilimitado",
         5: "Trimestral 12 Clases", 6: "Trimestral 24 Clases", 7: "Trimestral 36 Clases", 8: "Trimestral Ilimitado",
@@ -366,11 +369,13 @@ def obtener_alumnos(db: Session = Depends(get_db)):
             "id": u.id,
             "nombre": u.nombre,
             "email": u.email,
-            "plan_nombre": plan_nombre,  # Ahora envía el nombre real
+            "plan_nombre": plan_nombre,
             "clases_restantes": u.clases_restantes,
-            "fecha_vencimiento": u.fecha_vencimiento_plan or "Sin fecha", # Evita el Null
-            "activo": u.activo
+            "fecha_vencimiento": u.fecha_vencimiento_plan or "Sin fecha",
+            # Manejamos el caso de que 'activo' sea None en bases de datos viejas
+            "activo": u.activo if u.activo is not None else True 
         })
+        
     return resultado
 
 
