@@ -39,11 +39,13 @@ class DatosAdmin(BaseModel):
     nombre: str
     email: str
     password: str
+    telefono: Optional[str] = None # <-- AGREGAR ESTA LÍNEA
 
 class DatosRegistro(BaseModel):
     nombre: str
     email: str
     password: str
+    telefono: Optional[str] = None # <-- AGREGAR ESTA LÍNEA
 
 class ReservaCreate(BaseModel):
     usuario_id: int
@@ -54,6 +56,7 @@ class DatosProfesor(BaseModel):
     nombre: Optional[str] = None
     email: Optional[str] = None
     especialidad: Optional[str] = None # Flutter lo envía, pero lo ignoraremos en la BD por ahora
+    telefono: Optional[str] = None # <-- AGREGAR ESTA LÍNEA
 
 # 1. ¡La magia! Esta línea crea el archivo de la base de datos y las tablas automáticamente
 models.Base.metadata.create_all(bind=engine)
@@ -135,7 +138,8 @@ def registrar_usuario(datos: DatosRegistro, db: Session = Depends(get_db)):
         nombre=datos.nombre,
         email=datos.email,
         password=datos.password, 
-        rol="alumno"
+        rol="alumno",
+        telefono=datos.telefono # <-- ¡NO OLVIDES AGREGAR ESTO!
     )
     
     db.add(nuevo_usuario)
@@ -294,6 +298,7 @@ class NuevoProfesor(BaseModel):
     nombre: str
     email: str
     password: str
+    telefono: Optional[str] = None # <-- AGREGAR ESTA LÍNEA
 
 class ActualizarMembresia(BaseModel):
     membresia: str
@@ -309,7 +314,8 @@ def registrar_profesor(datos: NuevoProfesor, db: Session = Depends(get_db)):
         nombre=datos.nombre,
         email=correo_limpio,
         password=datos.password,
-        rol="profesor"
+        rol="profesor",
+        telefono=datos.telefono
     )
     db.add(nuevo_profesor)
     db.commit()
@@ -401,6 +407,7 @@ def obtener_profesores(db: Session = Depends(get_db)):
             "id": p.id,
             "nombre": p.nombre,
             "email": p.email,
+            "telefono": p.telefono,
             # Nos aseguramos de enviar el estado activo
             "activo": p.activo if p.activo is not None else True 
         })
@@ -507,7 +514,8 @@ def crear_administrador(datos: DatosAdmin, db: Session = Depends(get_db)):
         nombre=datos.nombre,
         email=datos.email,
         password=datos.password, 
-        rol="administrador"
+        rol="administrador",
+        telefono=datos.telefono
     )
     
     db.add(nuevo_admin)

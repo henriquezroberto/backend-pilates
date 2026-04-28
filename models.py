@@ -17,6 +17,7 @@ class Usuario(Base):
     email = Column(String, unique=True, index=True)
     password = Column(String)
     rol = Column(String, default="cliente") 
+    telefono = Column(String, nullable=True) # <-- AGREGAR ESTA LÍNEA
     
     # LA BILLETERA VIRTUAL DEL ALUMNO
     plan_id = Column(Integer, ForeignKey("planes.id"), nullable=True)
