@@ -442,6 +442,7 @@ def actualizar_profesor(profesor_id: int, datos: DatosProfesor, db: Session = De
     
     if datos.nombre is not None: profesor.nombre = datos.nombre
     if datos.email is not None: profesor.email = datos.email
+    if datos.telefono is not None: profesor.telefono = datos.telefono
     # Nota: No actualizamos 'especialidad' porque no existe en tu tabla de Base de Datos
     
     try:
