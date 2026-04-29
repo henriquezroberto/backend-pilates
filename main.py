@@ -562,6 +562,7 @@ def obtener_alumnos(db: Session = Depends(get_db)):
             "id": a.id,
             "nombre": a.nombre,
             "email": a.email,
+            "telefono": a.telefono,
             "plan_nombre": plan_nombre,
             "clases_restantes": a.clases_restantes,
             "fecha_vencimiento": a.fecha_vencimiento_plan or "N/A"
