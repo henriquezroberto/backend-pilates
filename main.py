@@ -547,25 +547,21 @@ def asignar_plan(usuario_id: int, plan_id: int, db: Session = Depends(get_db)):
 
 @app.get("/alumnos")
 def obtener_alumnos(db: Session = Depends(get_db)):
-    # Filtramos solo por el rol de 'cliente'
-    alumnos = db.query(models.Usuario).filter(models.Usuario.rol == 'cliente').all()
+    usuarios = db.query(models.Usuario).filter(models.Usuario.rol == 'cliente').all()
+    nombres_planes = {p.id: p.nombre for p in db.query(models.Plan).all()}
+    
     resultado = []
-    for a in alumnos:
-        # Buscamos el nombre del plan si tiene uno asignado
-        plan_nombre = "Sin Plan Activo"
-        if a.plan_id:
-            plan = db.query(models.Plan).filter(models.Plan.id == a.plan_id).first()
-            if plan:
-                plan_nombre = plan.nombre
+    for u in usuarios:
+        plan_nombre = nombres_planes.get(u.plan_id, "Sin Plan Activo") if u.plan_id else "Sin Plan Activo"
         
         resultado.append({
-            "id": a.id,
-            "nombre": a.nombre,
-            "email": a.email,
-            "telefono": a.telefono,
+            "id": u.id,
+            "nombre": u.nombre,
+            "email": u.email,
+            "telefono": u.telefono, # <--- REVISA ESTA LÍNEA (sin tilde)
             "plan_nombre": plan_nombre,
-            "clases_restantes": a.clases_restantes,
-            "fecha_vencimiento": a.fecha_vencimiento_plan or "N/A"
+            "clases_restantes": u.clases_restantes,
+            "activo": u.activo
         })
     return resultado
 
