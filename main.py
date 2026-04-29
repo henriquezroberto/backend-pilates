@@ -44,6 +44,13 @@ def inicializar_planes(db: Session):
 def enviar_correo_bienvenida(email_destino: str, nombre: str, contrasena: str, rol: str):
     # Ahora Python buscará la llave en el servidor, no en el código
     api_key = os.getenv("BREVO_API_KEY")
+
+    # --- NUESTRO CHISMOSO ---
+    if not api_key:
+        print("¡ALERTA! Python dice que la llave de Brevo está vacía o no existe en Render.")
+    else:
+        print("Python sí leyó una llave, el problema es que a Brevo no le gusta esa llave.")
+    # ------------------------
     
     # 2. Configuramos la URL de Brevo y los permisos
     url = "https://api.brevo.com/v3/smtp/email"
