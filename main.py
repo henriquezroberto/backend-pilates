@@ -63,12 +63,12 @@ def enviar_correo_bienvenida(email_destino: str, nombre: str, contrasena: str, r
     # 3. Armamos el correo (ahora usamos HTML para que se vea elegante)
     # Cambia "contactocentropilates@gmail.com" por el correo con el que te registraste en Brevo
     data = {
-        "sender": {"name": "Centro Pilates", "email": "contactocentropilates@gmail.com"}, 
+        "sender": {"name": "Centro Pilates Pilocas", "email": "contactocentropilates@gmail.com"}, 
         "to": [{"email": email_destino, "name": nombre}],
-        "subject": "¡Bienvenido a Centro Pilates! - Tus accesos",
+        "subject": "¡Bienvenido a Centro Pilates Pilocas! - Tus accesos",
         "htmlContent": f"""
         <div style="font-family: Arial, sans-serif; color: #333;">
-            <h2 style="color: #00796B;">¡Bienvenido a Centro Pilates!</h2>
+            <h2 style="color: #00796B;">¡Bienvenido a Centro Pilates Pilocas!</h2>
             <p>Hola <b>{nombre}</b>,</p>
             <p>Tu cuenta de <strong>{rol}</strong> ha sido creada exitosamente.</p>
             <p>Descarga nuestra aplicación e ingresa con las siguientes credenciales:</p>
@@ -77,7 +77,7 @@ def enviar_correo_bienvenida(email_destino: str, nombre: str, contrasena: str, r
                 <p><b>Contraseña temporal:</b> {contrasena}</p>
             </div>
             <p><small>Te recomendamos cambiar tu contraseña una vez que ingreses a la aplicación.</small></p>
-            <p>Saludos,<br>El equipo de Centro Pilates</p>
+            <p>Saludos,<br>El equipo de Centro Pilates Pilocas</p>
         </div>
         """
     }
@@ -108,6 +108,11 @@ class DatosRegistro(BaseModel):
 class ReservaCreate(BaseModel):
     usuario_id: int
     clase_id: int
+
+class CambioPassword(BaseModel):
+    usuario_id: int
+    password_actual: str
+    password_nueva: str
 
 # NUEVO MOLDE PARA EDITAR PROFESOR
 class DatosProfesor(BaseModel):
@@ -708,6 +713,28 @@ def cambiar_estado_usuario(usuario_id: int, db: Session = Depends(get_db)):
     estado_texto = "Reactivado" if usuario.activo else "Inactivado"
     return {"mensaje": f"El usuario {usuario.nombre} ha sido {estado_texto}", "activo": usuario.activo}
 
+@app.put("/cambiar-password")
+def cambiar_password(datos: CambioPassword, db: Session = Depends(get_db)):
+    # 1. Buscamos al usuario en la base de datos
+    usuario = db.query(models.Usuario).filter(models.Usuario.id == datos.usuario_id).first()
+    
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    # 2. Verificamos que la contraseña actual sea correcta
+    # (Revisa en tu models.py si tu columna se llama 'password' o 'contrasena' y ajusta esta línea)
+    if usuario.password != datos.password_actual:
+        raise HTTPException(status_code=400, detail="La contraseña actual es incorrecta")
+    
+    # 3. Guardamos la nueva contraseña
+    usuario.password = datos.password_nueva
+    
+    try:
+        db.commit()
+        return {"mensaje": "Contraseña actualizada exitosamente"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error al actualizar la contraseña")
 
 
 # --- SIMULADOR DE NOTIFICACIONES ---
