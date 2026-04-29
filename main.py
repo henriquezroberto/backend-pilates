@@ -6,6 +6,9 @@ from database import engine, SessionLocal
 from typing import List, Optional  # <--- ASEGÚRATE DE QUE ESTÉ "Optional"
 from datetime import datetime, timedelta
 from sqlalchemy import Column, Integer, String, Boolean
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 # Función para crear los planes si la tabla está vacía
 def inicializar_planes(db: Session):
@@ -31,8 +34,44 @@ def inicializar_planes(db: Session):
             nuevo_plan = models.Plan(nombre=p["nombre"], duracion_dias=p["duracion"], limite_clases=p["limite"])
             db.add(nuevo_plan)
         db.commit()
+## ¡¡IMPORTANTE!!: LLAMA A ESTA FUNCIÓN EN EL EVENTO DE INICIO DE LA APP (Lifespan) PARA QUE SE EJECUTE AUTOMÁTICAMENTE CUANDO LE DES AL BOTÓN DE RUN
+def enviar_correo_bienvenida(email_destino: str, nombre: str, contrasena: str, rol: str):
+    # AQUÍ PON TUS DATOS REALES
+    remitente = "paulharris.remoto@gmail.com" 
+    password_app = "bwxk tzjm ihvk nody"
 
+    msg = MIMEMultipart()
+    msg['From'] = remitente
+    msg['To'] = email_destino
+    msg['Subject'] = f"¡Bienvenido a Centro Pilates! - Tus accesos"
 
+    # Redactamos el correo. \n es un salto de línea.
+    cuerpo = f"""Hola {nombre},
+
+¡Bienvenido a Centro Pilates! Tu cuenta de {rol} ha sido creada exitosamente.
+
+Descarga nuestra aplicación e ingresa con las siguientes credenciales:
+Email: {email_destino}
+Contraseña temporal: {contrasena}
+
+Te recomendamos cambiar tu contraseña una vez que ingreses a la aplicación.
+
+Saludos,
+El equipo de Centro Pilates"""
+
+    msg.attach(MIMEText(cuerpo, 'plain'))
+
+    try:
+        # Nos conectamos al servidor de Gmail
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(remitente, password_app)
+        texto = msg.as_string()
+        server.sendmail(remitente, email_destino, texto)
+        server.quit()
+        print(f"Correo de bienvenida enviado exitosamente a {email_destino}")
+    except Exception as e:
+        print(f"Error al enviar correo a {email_destino}: {e}")
 
 # ESTRUCTURAS DE DATOS PARA ADMINISTRADORES
 class DatosAdmin(BaseModel):
@@ -128,7 +167,7 @@ def quitar_plan(usuario_id: int, db: Session = Depends(get_db)):
 
 # 4. NUEVO: Endpoint para registrar un usuario
 @app.post("/registro")
-def registrar_usuario(datos: DatosRegistro, db: Session = Depends(get_db)):
+def registrar_usuario(datos: DatosRegistro, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     usuario_existente = db.query(models.Usuario).filter(models.Usuario.email == datos.email).first()
     if usuario_existente:
         raise HTTPException(status_code=400, detail="El correo ya está registrado")
@@ -139,13 +178,23 @@ def registrar_usuario(datos: DatosRegistro, db: Session = Depends(get_db)):
         email=datos.email,
         password=datos.password, 
         rol="alumno",
-        telefono=datos.telefono # <-- ¡NO OLVIDES AGREGAR ESTO!
+        telefono=datos.telefono
     )
     
     db.add(nuevo_usuario)
     try:
         db.commit()
-        return {"mensaje": "Usuario registrado exitosamente"}
+        
+        # ---> NUEVO: Programamos el envío del correo justo después de guardar exitosamente
+        background_tasks.add_task(
+            enviar_correo_bienvenida,
+            email_destino=datos.email,
+            nombre=datos.nombre,
+            contrasena=datos.password,
+            rol="Alumno"
+        )
+        
+        return {"mensaje": "Usuario registrado exitosamente y correo enviado"}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail="Error al crear el usuario")
@@ -305,8 +354,10 @@ class ActualizarMembresia(BaseModel):
 
 # 2. Endpoint para que el Admin registre a un Profesor
 @app.post("/crear-profesor")
-def registrar_profesor(datos: NuevoProfesor, db: Session = Depends(get_db)):
+def registrar_profesor(datos: NuevoProfesor, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     correo_limpio = datos.email.lower().strip()
+    
+    # Verificamos si el correo ya existe
     if db.query(models.Usuario).filter(models.Usuario.email == correo_limpio).first():
         raise HTTPException(status_code=400, detail="El correo ya pertenece a alguien")
     
@@ -317,9 +368,26 @@ def registrar_profesor(datos: NuevoProfesor, db: Session = Depends(get_db)):
         rol="profesor",
         telefono=datos.telefono
     )
+    
     db.add(nuevo_profesor)
-    db.commit()
-    return {"mensaje": "Profesor registrado con éxito"}
+    
+    try:
+        db.commit()
+        
+        # Programamos el envío del correo de bienvenida para el profesor
+        background_tasks.add_task(
+            enviar_correo_bienvenida,
+            email_destino=correo_limpio,
+            nombre=datos.nombre,
+            contrasena=datos.password,
+            rol="Profesor" # Especificamos el rol para el cuerpo del mensaje
+        )
+        
+        return {"mensaje": "Profesor registrado con éxito y credenciales enviadas"}
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al registrar profesor: {str(e)}")
 
 @app.post("/reservar")
 def reservar_clase(reserva: ReservaCreate, db: Session = Depends(get_db)):
@@ -506,12 +574,11 @@ def eliminar_clase(clase_id: int, db: Session = Depends(get_db)):
 
 # --- NUEVO: CREAR ADMINISTRADOR ---
 @app.post("/crear-admin")
-def crear_administrador(datos: DatosAdmin, db: Session = Depends(get_db)):
+def crear_administrador(datos: DatosAdmin, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     usuario_existente = db.query(models.Usuario).filter(models.Usuario.email == datos.email).first()
     if usuario_existente:
         raise HTTPException(status_code=400, detail="El correo ya está registrado")
     
-    # Hemos quitado la línea de 'membresia="Staff"'
     nuevo_admin = models.Usuario(
         nombre=datos.nombre,
         email=datos.email,
@@ -523,7 +590,18 @@ def crear_administrador(datos: DatosAdmin, db: Session = Depends(get_db)):
     db.add(nuevo_admin)
     try:
         db.commit()
-        return {"mensaje": "Administrador creado exitosamente"}
+        
+        # --- PROGRAMAR ENVÍO DE CORREO EN SEGUNDO PLANO ---
+        background_tasks.add_task(
+            enviar_correo_bienvenida,
+            email_destino=datos.email,
+            nombre=datos.nombre,
+            contrasena=datos.password,
+            rol="Administrador"
+        )
+        
+        return {"mensaje": "Administrador creado exitosamente y accesos enviados"}
+        
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail="Error al crear administrador")
