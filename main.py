@@ -385,6 +385,7 @@ def obtener_alumnos(db: Session = Depends(get_db)):
             "id": u.id,
             "nombre": u.nombre,
             "email": u.email,
+            "telefono": u.telefono, # <--- REVISA ESTA LÍNEA (sin tilde)
             "plan_nombre": plan_nombre,
             "clases_restantes": u.clases_restantes,
             "fecha_vencimiento": u.fecha_vencimiento_plan or "Sin fecha",
@@ -545,25 +546,7 @@ def asignar_plan(usuario_id: int, plan_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"mensaje": f"Plan {plan.nombre} asignado hasta {usuario.fecha_vencimiento_plan}"}
 
-@app.get("/alumnos")
-def obtener_alumnos(db: Session = Depends(get_db)):
-    usuarios = db.query(models.Usuario).filter(models.Usuario.rol == 'cliente').all()
-    nombres_planes = {p.id: p.nombre for p in db.query(models.Plan).all()}
-    
-    resultado = []
-    for u in usuarios:
-        plan_nombre = nombres_planes.get(u.plan_id, "Sin Plan Activo") if u.plan_id else "Sin Plan Activo"
-        
-        resultado.append({
-            "id": u.id,
-            "nombre": u.nombre,
-            "email": u.email,
-            "telefono": u.telefono, # <--- REVISA ESTA LÍNEA (sin tilde)
-            "plan_nombre": plan_nombre,
-            "clases_restantes": u.clases_restantes,
-            "activo": u.activo
-        })
-    return resultado
+
 
 @app.get("/perfil/{usuario_id}")
 def obtener_perfil(usuario_id: int, db: Session = Depends(get_db)):
