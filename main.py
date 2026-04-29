@@ -1,4 +1,6 @@
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, requests # <- Agrega BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks # <- Agrega BackgroundTasks
+import requests # <--- DEBE ESTAR SOLITO EN SU PROPIA LÍNEA
+import os
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import models
@@ -11,7 +13,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import json
 from urllib import request as urllib_request, error as urllib_error
-import os
+
 
 # Función para crear los planes si la tabla está vacía
 def inicializar_planes(db: Session):
