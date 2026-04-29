@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks # <- Agrega BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, requests # <- Agrega BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import models
@@ -9,6 +9,9 @@ from sqlalchemy import Column, Integer, String, Boolean
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import json
+from urllib import request as urllib_request, error as urllib_error
+import os
 
 # Función para crear los planes si la tabla está vacía
 def inicializar_planes(db: Session):
@@ -34,44 +37,51 @@ def inicializar_planes(db: Session):
             nuevo_plan = models.Plan(nombre=p["nombre"], duracion_dias=p["duracion"], limite_clases=p["limite"])
             db.add(nuevo_plan)
         db.commit()
+
 ## ¡¡IMPORTANTE!!: LLAMA A ESTA FUNCIÓN EN EL EVENTO DE INICIO DE LA APP (Lifespan) PARA QUE SE EJECUTE AUTOMÁTICAMENTE CUANDO LE DES AL BOTÓN DE RUN
 def enviar_correo_bienvenida(email_destino: str, nombre: str, contrasena: str, rol: str):
-    # AQUÍ PON TUS DATOS REALES
-    remitente = "paulharris.remoto@gmail.com" 
-    password_app = "bwxk tzjm ihvk nody"
-
-    msg = MIMEMultipart()
-    msg['From'] = remitente
-    msg['To'] = email_destino
-    msg['Subject'] = f"¡Bienvenido a Centro Pilates! - Tus accesos"
-
-    # Redactamos el correo. \n es un salto de línea.
-    cuerpo = f"""Hola {nombre},
-
-¡Bienvenido a Centro Pilates! Tu cuenta de {rol} ha sido creada exitosamente.
-
-Descarga nuestra aplicación e ingresa con las siguientes credenciales:
-Email: {email_destino}
-Contraseña temporal: {contrasena}
-
-Te recomendamos cambiar tu contraseña una vez que ingreses a la aplicación.
-
-Saludos,
-El equipo de Centro Pilates"""
-
-    msg.attach(MIMEText(cuerpo, 'plain'))
-
+    # Ahora Python buscará la llave en el servidor, no en el código
+    api_key = os.getenv("BREVO_API_KEY")
+    
+    # 2. Configuramos la URL de Brevo y los permisos
+    url = "https://api.brevo.com/v3/smtp/email"
+    headers = {
+        "accept": "application/json",
+        "api-key": api_key,
+        "content-type": "application/json"
+    }
+    
+    # 3. Armamos el correo (ahora usamos HTML para que se vea elegante)
+    # Cambia "contactocentropilates@gmail.com" por el correo con el que te registraste en Brevo
+    data = {
+        "sender": {"name": "Centro Pilates", "email": "contactocentropilates@gmail.com"}, 
+        "to": [{"email": email_destino, "name": nombre}],
+        "subject": "¡Bienvenido a Centro Pilates! - Tus accesos",
+        "htmlContent": f"""
+        <div style="font-family: Arial, sans-serif; color: #333;">
+            <h2 style="color: #00796B;">¡Bienvenido a Centro Pilates!</h2>
+            <p>Hola <b>{nombre}</b>,</p>
+            <p>Tu cuenta de <strong>{rol}</strong> ha sido creada exitosamente.</p>
+            <p>Descarga nuestra aplicación e ingresa con las siguientes credenciales:</p>
+            <div style="background-color: #f5f5f5; padding: 15px; border-radius: 8px;">
+                <p><b>Email:</b> {email_destino}</p>
+                <p><b>Contraseña temporal:</b> {contrasena}</p>
+            </div>
+            <p><small>Te recomendamos cambiar tu contraseña una vez que ingreses a la aplicación.</small></p>
+            <p>Saludos,<br>El equipo de Centro Pilates</p>
+        </div>
+        """
+    }
+    
+    # 4. Enviamos el correo usando el tráfico web normal (puerto abierto)
     try:
-        # Nos conectamos al servidor de Gmail
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(remitente, password_app)
-        texto = msg.as_string()
-        server.sendmail(remitente, email_destino, texto)
-        server.quit()
-        print(f"Correo de bienvenida enviado exitosamente a {email_destino}")
+        response = requests.post(url, headers=headers, json=data)
+        if response.status_code in [200, 201]:
+            print(f"Correo enviado exitosamente a {email_destino} vía Brevo")
+        else:
+            print(f"Error de Brevo: {response.text}")
     except Exception as e:
-        print(f"Error al enviar correo a {email_destino}: {e}")
+        print(f"Excepción al intentar enviar correo a {email_destino}: {e}")
 
 # ESTRUCTURAS DE DATOS PARA ADMINISTRADORES
 class DatosAdmin(BaseModel):
