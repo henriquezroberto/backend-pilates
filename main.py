@@ -13,7 +13,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import json
 from urllib import request as urllib_request, error as urllib_error
-
+from datetime import datetime
 
 # Función para crear los planes si la tabla está vacía
 def inicializar_planes(db: Session):
@@ -147,6 +147,10 @@ class RegistroData(BaseModel):
 class ReservaData(BaseModel):
     usuario_id: int
     clase_id: int
+
+class EdicionPlanAdmin(BaseModel):
+    clases_restantes: int
+    fecha_vencimiento: str # Recibiremos la fecha como texto "YYYY-MM-DD"
 
 # Llama a esta función dentro del evento de inicio usando el nuevo lifespan handler
 from contextlib import asynccontextmanager
@@ -735,6 +739,32 @@ def cambiar_password(datos: CambioPassword, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail="Error al actualizar la contraseña")
+
+@app.put("/corregir-plan/{usuario_id}")
+def corregir_plan_admin(usuario_id: int, datos: EdicionPlanAdmin, db: Session = Depends(get_db)):
+    usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
+    
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    if not usuario.plan_id or not usuario.activo:
+        raise HTTPException(status_code=400, detail="El usuario no tiene un plan activo para editar")
+
+    # Actualizamos los valores manualmente
+    usuario.clases_restantes = datos.clases_restantes
+    
+    try:
+        # Convertimos el texto "YYYY-MM-DD" a una fecha real para la base de datos
+        nueva_fecha = datetime.strptime(datos.fecha_vencimiento, "%Y-%m-%d").date()
+        usuario.fecha_vencimiento = nueva_fecha
+        
+        db.commit()
+        return {"mensaje": "Plan corregido exitosamente"}
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Formato de fecha inválido. Usa YYYY-MM-DD")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error al actualizar el plan")
 
 
 # --- SIMULADOR DE NOTIFICACIONES ---
