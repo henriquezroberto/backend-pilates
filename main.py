@@ -292,28 +292,16 @@ def crear_clase(datos: ClaseData, db: Session = Depends(get_db)):
 # Modificamos para traer el nombre del profesor directamente
 # 1. Actualización para ver el nombre del profesor en la lista general
 @app.get("/clases")
-def obtener_clases(db: Session = Depends(get_db)):
-    try:
+def obtener_clases(profesor_id: Optional[int] = None, db: Session = Depends(get_db)):
+    # Si la petición incluye un 'profesor_id' (Ej: /clases?profesor_id=5)
+    if profesor_id:
+        # Filtramos y devolvemos SOLO las clases donde él es el profesor
+        clases = db.query(models.Clase).filter(models.Clase.profesor_id == profesor_id).all()
+    else:
+        # Si no nos envían ID (como cuando entra el Administrador), devolvemos TODAS
         clases = db.query(models.Clase).all()
-        resultado = []
-        for c in clases:
-            # Buscamos al profesor en la tabla de Usuarios
-            profesor = db.query(models.Usuario).filter(models.Usuario.id == c.profesor_id).first()
-            
-            resultado.append({
-                "id": c.id,
-                "nombre": c.nombre,
-                "fecha": c.fecha,
-                "hora": c.hora,
-                "cupo_maximo": c.cupo_maximo,
-                "disciplina": c.disciplina,
-                "profesor_id": c.profesor_id,
-                "profesor_nombre": profesor.nombre if profesor else "Por asignar"
-            })
-        return resultado
-    except Exception as e:
-        print(f"Error al listar clases: {e}")
-        raise HTTPException(status_code=500, detail="Error al obtener la lista de clases")
+        
+    return clases
 
 # Nuevo endpoint para editar datos de la clase (como el profesor)
 @app.put("/clases/{clase_id}")
