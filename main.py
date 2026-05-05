@@ -741,9 +741,8 @@ def corregir_plan_admin(usuario_id: int, datos: EdicionPlanAdmin, db: Session = 
     # 1. Actualizamos las clases
     usuario.clases_restantes = datos.clases_restantes
     
-    # 2. LA SOLUCIÓN: Guardamos la fecha directamente como texto
-    # SQLAlchemy se encargará de procesarlo correctamente en la base de datos
-    usuario.fecha_vencimiento = datos.fecha_vencimiento
+    # 2. AQUÍ ESTÁ LA CORRECCIÓN: Usamos el nombre real de tu columna (fecha_vencimiento_plan)
+    usuario.fecha_vencimiento_plan = datos.fecha_vencimiento
     
     try:
         db.commit()
