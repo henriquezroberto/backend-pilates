@@ -738,18 +738,16 @@ def corregir_plan_admin(usuario_id: int, datos: EdicionPlanAdmin, db: Session = 
     if not usuario.plan_id or not usuario.activo:
         raise HTTPException(status_code=400, detail="El usuario no tiene un plan activo para editar")
 
-    # Actualizamos los valores manualmente
+    # 1. Actualizamos las clases
     usuario.clases_restantes = datos.clases_restantes
     
+    # 2. LA SOLUCIÓN: Guardamos la fecha directamente como texto
+    # SQLAlchemy se encargará de procesarlo correctamente en la base de datos
+    usuario.fecha_vencimiento = datos.fecha_vencimiento
+    
     try:
-        # Convertimos el texto "YYYY-MM-DD" a una fecha real para la base de datos
-        nueva_fecha = datetime.strptime(datos.fecha_vencimiento, "%Y-%m-%d").date()
-        usuario.fecha_vencimiento = nueva_fecha
-        
         db.commit()
         return {"mensaje": "Plan corregido exitosamente"}
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Formato de fecha inválido. Usa YYYY-MM-DD")
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail="Error al actualizar el plan")
