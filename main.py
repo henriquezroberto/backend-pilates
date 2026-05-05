@@ -14,6 +14,8 @@ from email.mime.multipart import MIMEMultipart
 import json
 from urllib import request as urllib_request, error as urllib_error
 from datetime import datetime
+import random
+import string
 
 # Función para crear los planes si la tabla está vacía
 def inicializar_planes(db: Session):
@@ -92,6 +94,43 @@ def enviar_correo_bienvenida(email_destino: str, nombre: str, contrasena: str, r
     except Exception as e:
         print(f"Excepción al intentar enviar correo a {email_destino}: {e}")
 
+def enviar_correo_recuperacion(email_destino: str, nombre: str, nueva_contrasena: str):
+    api_key = os.getenv("BREVO_API_KEY")
+    if not api_key:
+        print("Falta la llave de Brevo para enviar recuperación.")
+        return
+    
+    url = "https://api.brevo.com/v3/smtp/email"
+    headers = {
+        "accept": "application/json",
+        "api-key": api_key,
+        "content-type": "application/json"
+    }
+    
+    data = {
+        "sender": {"name": "Centro Pilates Pilocas", "email": "contactocentropilates@gmail.com"},
+        "to": [{"email": email_destino, "name": nombre}],
+        "subject": "Recuperación de contraseña - Centro Pilates Pilocas",
+        "htmlContent": f"""
+        <div style="font-family: Arial, sans-serif; color: #333;">
+            <h2 style="color: #00796B;">Recuperación de Acceso</h2>
+            <p>Hola <b>{nombre}</b>,</p>
+            <p>Hemos recibido una solicitud para recuperar tu contraseña. Aquí tienes una contraseña temporal para acceder a tu cuenta:</p>
+            <div style="background-color: #f5f5f5; padding: 15px; border-radius: 8px;">
+                <p style="font-size: 18px; text-align: center; letter-spacing: 2px;"><b>{nueva_contrasena}</b></p>
+            </div>
+            <p><small>Te recomendamos cambiar esta contraseña inmediatamente después de iniciar sesión, desde la sección "Mi Perfil".</small></p>
+            <p>Saludos,<br>El equipo de Centro Pilates</p>
+        </div>
+        """
+    }
+    
+    try:
+        requests.post(url, headers=headers, json=data)
+    except Exception as e:
+        print(f"Error al enviar correo de recuperación: {e}")
+
+
 # ESTRUCTURAS DE DATOS PARA ADMINISTRADORES
 class DatosAdmin(BaseModel):
     nombre: str
@@ -138,6 +177,9 @@ def get_db():
 class LoginData(BaseModel):
     email: str
     password: str
+
+class RecuperarPasswordData(BaseModel):
+    email: str
 
 class RegistroData(BaseModel):
     nombre: str
@@ -763,6 +805,36 @@ def corregir_plan_admin(usuario_id: int, datos: EdicionPlanAdmin, db: Session = 
         db.rollback()
         raise HTTPException(status_code=500, detail="Error al actualizar el plan")
 
+@app.post("/recuperar-password")
+def recuperar_password(datos: RecuperarPasswordData, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    correo_limpio = datos.email.lower().strip()
+    
+    # 1. Buscamos si el usuario existe (¡Funciona para Admin, Profes y Alumnos!)
+    usuario = db.query(models.Usuario).filter(models.Usuario.email == correo_limpio).first()
+    
+    if not usuario:
+        raise HTTPException(status_code=404, detail="No existe una cuenta registrada con este correo.")
+    
+    # 2. Generamos una contraseña temporal de 8 caracteres aleatorios (letras y números)
+    caracteres = string.ascii_letters + string.digits
+    nueva_pass = ''.join(random.choice(caracteres) for i in range(8))
+    
+    # 3. Guardamos la nueva clave en la Base de Datos
+    usuario.password = nueva_pass
+    
+    try:
+        db.commit()
+        # 4. Enviamos el correo en segundo plano
+        background_tasks.add_task(
+            enviar_correo_recuperacion,
+            email_destino=correo_limpio,
+            nombre=usuario.nombre,
+            nueva_contrasena=nueva_pass
+        )
+        return {"mensaje": "Se ha enviado una contraseña temporal a tu correo."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error al generar nueva contraseña")
 
 # --- SIMULADOR DE NOTIFICACIONES ---
 def simular_envio_correo(destinatario: str, asunto: str, mensaje: str):
