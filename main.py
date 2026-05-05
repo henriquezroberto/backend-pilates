@@ -328,12 +328,12 @@ def obtener_mis_clases(usuario_id: int, db: Session = Depends(get_db)):
     
     resultado = []
     if usuario.rol == 'profesor':
-        # ¡Como hay una sola tabla, el ID del profesor es exactamente su ID de usuario!
         clases = db.query(models.Clase).filter(models.Clase.profesor_id == usuario.id).all()
         for c in clases:
             resultado.append({
                 "id": c.id, "nombre": c.nombre, "fecha": c.fecha, "hora": c.hora, 
-                "disciplina": c.disciplina, "profesor_nombre": usuario.nombre
+                "disciplina": c.disciplina, "profesor_nombre": usuario.nombre,
+                "profesor_id": usuario.id # <--- SE AGREGÓ ESTO PARA FLUTTER
             })
     else:
         reservas = db.query(models.Reserva).filter(models.Reserva.usuario_id == usuario_id).all()
@@ -344,7 +344,8 @@ def obtener_mis_clases(usuario_id: int, db: Session = Depends(get_db)):
                 resultado.append({
                     "id": clase.id, "nombre": clase.nombre, "fecha": clase.fecha, "hora": clase.hora, 
                     "disciplina": clase.disciplina, 
-                    "profesor_nombre": prof.nombre if prof else "Por asignar"
+                    "profesor_nombre": prof.nombre if prof else "Por asignar",
+                    "profesor_id": clase.profesor_id # <--- SE AGREGÓ ESTO PARA FLUTTER
                 })
                 
     return resultado
@@ -352,10 +353,21 @@ def obtener_mis_clases(usuario_id: int, db: Session = Depends(get_db)):
 # Endpoint para que el Admin vea la lista de alumnos de una clase
 @app.get("/clases/{clase_id}/asistentes")
 def obtener_asistentes(clase_id: int, db: Session = Depends(get_db)):
-    # Unimos la tabla Usuarios con la tabla Reservas
-    asistentes = db.query(models.Usuario).join(models.Reserva).filter(
-        models.Reserva.clase_id == clase_id
-    ).all()
+    # 1. Buscamos directamente las reservas que coincidan con esta clase
+    reservas = db.query(models.Reserva).filter(models.Reserva.clase_id == clase_id).all()
+    
+    asistentes = []
+    # 2. Por cada reserva, buscamos la ficha del alumno
+    for r in reservas:
+        alumno = db.query(models.Usuario).filter(models.Usuario.id == r.usuario_id).first()
+        if alumno:
+            # Enviamos a Flutter exactamente lo que necesita leer
+            asistentes.append({
+                "id": alumno.id,
+                "nombre": alumno.nombre,
+                "email": alumno.email
+            })
+            
     return asistentes
 
 # 1. Estructuras de datos para las nuevas funciones
