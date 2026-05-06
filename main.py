@@ -648,9 +648,10 @@ def actualizar_profesor(profesor_id: int, datos: DatosProfesor, db: Session = De
 def cancelar_reserva(
     usuario_id: int, 
     clase_id: int, 
-    background_tasks: BackgroundTasks, # <- NUEVO: Pedimos el gestor de tareas
+    background_tasks: BackgroundTasks, 
     db: Session = Depends(get_db)
 ):
+    # 1. Buscamos la reserva
     reserva = db.query(models.Reserva).filter(
         models.Reserva.usuario_id == usuario_id,
         models.Reserva.clase_id == clase_id
@@ -659,18 +660,28 @@ def cancelar_reserva(
     if not reserva:
         raise HTTPException(status_code=404, detail="No se encontró la reserva")
         
+    # 2. Preparamos el borrado de la reserva
     db.delete(reserva)
+
+    # 3. Buscamos a los involucrados
+    clase = db.query(models.Clase).filter(models.Clase.id == clase_id).first()
+    alumno = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
+    
+    # ==========================================
+    # 🛡️ EL ESCUDO ANTI-DESPISTES (REEMBOLSO)
+    # ==========================================
+    if alumno and alumno.clases_restantes != 999:
+        alumno.clases_restantes += 1  # ¡Le devolvemos su clase!
+        
+    # Guardamos los cambios en la base de datos (Borrado + Reembolso al mismo tiempo)
     db.commit()
 
     # --- LÓGICA DE NOTIFICACIÓN ---
-    # Buscamos la clase para saber su nombre y quién es el profesor
-    clase = db.query(models.Clase).filter(models.Clase.id == clase_id).first()
     if clase and clase.profesor_id:
         profesor = db.query(models.Usuario).filter(models.Usuario.id == clase.profesor_id).first()
-        alumno = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
         
         if profesor and alumno:
-            # Mandamos a ejecutar el correo en segundo plano
+            # Mandamos a ejecutar el correo simulado en segundo plano al profesor
             background_tasks.add_task(
                 simular_envio_correo,
                 profesor.email,
@@ -678,7 +689,7 @@ def cancelar_reserva(
                 f"El alumno {alumno.nombre} ha cancelado su asistencia a '{clase.nombre}'. El cupo está disponible nuevamente en el sistema."
             )
 
-    return {"mensaje": "Reserva cancelada y cupo liberado"}
+    return {"mensaje": "Reserva cancelada y clase devuelta a tu saldo"}
 
 @app.delete("/clases/{clase_id}")
 def eliminar_clase(clase_id: int, db: Session = Depends(get_db)):
