@@ -130,6 +130,49 @@ def enviar_correo_recuperacion(email_destino: str, nombre: str, nueva_contrasena
     except Exception as e:
         print(f"Error al enviar correo de recuperación: {e}")
 
+def enviar_correo_reserva(email_destino: str, nombre: str, nombre_clase: str, fecha: str, hora: str):
+    api_key = os.getenv("BREVO_API_KEY")
+    if not api_key:
+        print("Falta la llave de Brevo para enviar confirmación de reserva.")
+        return
+    
+    url = "https://api.brevo.com/v3/smtp/email"
+    headers = {
+        "accept": "application/json",
+        "api-key": api_key,
+        "content-type": "application/json"
+    }
+    
+    data = {
+        "sender": {"name": "Centro Pilates Pilocas", "email": "contactocentropilates@gmail.com"},
+        "to": [{"email": email_destino, "name": nombre}],
+        "subject": f"¡Reserva Confirmada! - {nombre_clase}",
+        "htmlContent": f"""
+        <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: auto;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h2 style="color: #00796B; margin: 0;">¡Clase Reservada con Éxito! 🎉</h2>
+            </div>
+            <p>Hola <b>{nombre}</b>,</p>
+            <p>Tu reserva ha sido confirmada. Aquí tienes los detalles de tu sesión:</p>
+            
+            <div style="background-color: #E0F2F1; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                <p style="margin: 5px 0; font-size: 16px;">🧘‍♀️ <b>Clase:</b> {nombre_clase}</p>
+                <p style="margin: 5px 0; font-size: 16px;">📅 <b>Fecha:</b> {fecha}</p>
+                <p style="margin: 5px 0; font-size: 16px;">⏰ <b>Hora:</b> {hora}</p>
+            </div>
+            
+            <p><small><b>Recordatorio:</b> Te recomendamos llegar 5 minutos antes. Si tienes algún imprevisto y no puedes asistir, por favor cancela tu reserva desde la aplicación para liberar el cupo a otro compañero.</small></p>
+            <br>
+            <p>¡Te esperamos con toda la energía!<br><b>El equipo de Centro Pilates</b></p>
+        </div>
+        """
+    }
+    
+    try:
+        requests.post(url, headers=headers, json=data)
+    except Exception as e:
+        print(f"Error al enviar confirmación de reserva: {e}")
+
 
 # ESTRUCTURAS DE DATOS PARA ADMINISTRADORES
 class DatosAdmin(BaseModel):
@@ -460,14 +503,14 @@ def registrar_profesor(datos: NuevoProfesor, background_tasks: BackgroundTasks, 
         raise HTTPException(status_code=500, detail=f"Error al registrar profesor: {str(e)}")
 
 @app.post("/reservar")
-def reservar_clase(reserva: ReservaCreate, db: Session = Depends(get_db)):
+def reservar_clase(reserva: ReservaCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     usuario = db.query(models.Usuario).filter(models.Usuario.id == reserva.usuario_id).first()
     clase = db.query(models.Clase).filter(models.Clase.id == reserva.clase_id).first()
     
     if not usuario or not clase:
         raise HTTPException(status_code=404, detail="No existe el usuario o la clase")
 
-    # --- NUEVO: SEGURIDAD ANTI-DUPLICADOS ---
+    # --- SEGURIDAD ANTI-DUPLICADOS ---
     reserva_previa = db.query(models.Reserva).filter(
         models.Reserva.usuario_id == reserva.usuario_id,
         models.Reserva.clase_id == reserva.clase_id
@@ -476,29 +519,37 @@ def reservar_clase(reserva: ReservaCreate, db: Session = Depends(get_db)):
     if reserva_previa:
         raise HTTPException(status_code=400, detail="Ya estás inscrito en esta clase. ¡No gastes tus créditos de más!")
     
-    # 2. VALIDACIÓN DE BILLETERA
-    # ¿Tiene un plan activo?
+    # --- VALIDACIÓN DE BILLETERA ---
     if not usuario.fecha_vencimiento_plan:
         raise HTTPException(status_code=400, detail="No tienes un plan activo. ¡Contrata uno para agendar!")
     
-    # ¿El plan venció?
     fecha_venc = datetime.strptime(usuario.fecha_vencimiento_plan, "%Y-%m-%d")
     if datetime.now() > fecha_venc:
         raise HTTPException(status_code=400, detail="Tu plan ha vencido. ¡Renúevalo para seguir entrenando!")
     
-    # ¿Le quedan clases? (Si es 999 es ilimitado)
     if usuario.clases_restantes <= 0 and usuario.clases_restantes != 999:
         raise HTTPException(status_code=400, detail="No te quedan clases en tu saldo mensual.")
 
-    # 3. Registrar reserva y descontar clase
+    # --- REGISTRAR RESERVA ---
     nueva_reserva = models.Reserva(usuario_id=reserva.usuario_id, clase_id=reserva.clase_id)
     db.add(nueva_reserva)
     
-    # Descontamos la clase del saldo si no es un plan ilimitado
     if usuario.clases_restantes != 999:
         usuario.clases_restantes -= 1
         
     db.commit()
+
+    # ---> NUEVO: ENVIAR EL CORREO DE CONFIRMACIÓN <---
+    # Lo enviamos en segundo plano para que la App del celular no se quede "congelada" esperando
+    background_tasks.add_task(
+        enviar_correo_reserva,
+        email_destino=usuario.email,
+        nombre=usuario.nombre,
+        nombre_clase=clase.nombre,
+        fecha=clase.fecha,
+        hora=clase.hora
+    )
+
     return {"mensaje": "Reserva exitosa", "clases_restantes": usuario.clases_restantes}
 
 
