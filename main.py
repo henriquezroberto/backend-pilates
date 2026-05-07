@@ -3,6 +3,7 @@ import requests # <--- DEBE ESTAR SOLITO EN SU PROPIA LÍNEA
 import os
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import text
 import models
 from database import engine, SessionLocal
 from typing import List, Optional  # <--- ASEGÚRATE DE QUE ESTÉ "Optional"
@@ -243,6 +244,15 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db = SessionLocal()
+    
+    # TRUCO: Intentamos crear la columna 'asistio' por si no existe. 
+    # Si ya existe, simplemente ignora el error y sigue.
+    try:
+        db.execute(text("ALTER TABLE reservas ADD COLUMN asistio BOOLEAN DEFAULT 0"))
+        db.commit()
+    except Exception:
+        db.rollback()
+        
     inicializar_planes(db)
     db.close()
     yield
@@ -450,10 +460,34 @@ def obtener_asistentes(clase_id: int, db: Session = Depends(get_db)):
             asistentes.append({
                 "id": alumno.id,
                 "nombre": alumno.nombre,
-                "email": alumno.email
+                "email": alumno.email,
+                "asistio": r.asistio  # <--- AHORA ENVIAMOS ESTO 
             })
             
     return asistentes
+
+class AsistenciaData(BaseModel):
+    asistio: bool
+
+
+@app.put("/reservas/{usuario_id}/{clase_id}/asistencia")
+def marcar_asistencia(usuario_id: int, clase_id: int, datos: AsistenciaData, db: Session = Depends(get_db)):
+    reserva = db.query(models.Reserva).filter(
+        models.Reserva.usuario_id == usuario_id,
+        models.Reserva.clase_id == clase_id
+    ).first()
+    
+    if not reserva:
+        raise HTTPException(status_code=404, detail="Reserva no encontrada")
+        
+    reserva.asistio = datos.asistio
+    
+    try:
+        db.commit()
+        return {"mensaje": "Asistencia actualizada", "asistio": reserva.asistio}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error al guardar asistencia")
 
 # 1. Estructuras de datos para las nuevas funciones
 class NuevoProfesor(BaseModel):

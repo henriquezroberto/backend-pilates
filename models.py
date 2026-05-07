@@ -42,3 +42,5 @@ class Reserva(Base):
     id = Column(Integer, primary_key=True, index=True)
     usuario_id = Column(Integer, ForeignKey("usuarios.id"))
     clase_id = Column(Integer, ForeignKey("clases.id"))
+    # 📍 AGREGA ESTA LÍNEA AL FINAL DE LA CLASE:
+    asistio = Column(Boolean, default=False)
