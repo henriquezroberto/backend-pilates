@@ -13,7 +13,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import json
 from urllib import request as urllib_request, error as urllib_error
-from datetime import datetime
+from datetime import datetime, timedelta
 import random
 import string
 
@@ -651,7 +651,7 @@ def cancelar_reserva(
     background_tasks: BackgroundTasks, 
     db: Session = Depends(get_db)
 ):
-    # 1. Buscamos la reserva
+    # 1. Buscamos la reserva, la clase y el alumno
     reserva = db.query(models.Reserva).filter(
         models.Reserva.usuario_id == usuario_id,
         models.Reserva.clase_id == clase_id
@@ -660,28 +660,44 @@ def cancelar_reserva(
     if not reserva:
         raise HTTPException(status_code=404, detail="No se encontró la reserva")
         
-    # 2. Preparamos el borrado de la reserva
-    db.delete(reserva)
-
-    # 3. Buscamos a los involucrados
     clase = db.query(models.Clase).filter(models.Clase.id == clase_id).first()
     alumno = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
-    
-    # ==========================================
-    # 🛡️ EL ESCUDO ANTI-DESPISTES (REEMBOLSO)
-    # ==========================================
+
+    # =======================================================
+    # ⏰ OPCIÓN 2: BLOQUEO POR TIEMPO LÍMITE (2 HORAS ANTES)
+    # =======================================================
+    if clase:
+        try:
+            # Juntamos la fecha y hora de la clase (Ej: "2026-05-10 18:00")
+            fecha_hora_clase_str = f"{clase.fecha} {clase.hora}"
+            fecha_hora_clase = datetime.strptime(fecha_hora_clase_str, "%Y-%m-%d %H:%M")
+            
+            # Calculamos la diferencia entre la hora de la clase y AHORA
+            tiempo_faltante = fecha_hora_clase - datetime.now()
+            
+            # Si faltan menos de 2 horas, o la clase ya empezó/terminó, BLOQUEAMOS:
+            if tiempo_faltante < timedelta(hours=2):
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Límite excedido: Solo puedes cancelar con más de 2 horas de anticipación. Contáctate con recepción."
+                )
+        except ValueError:
+            # Si escribiste mal la hora al crear la clase (ej: "18:00 pm"), ignoramos el reloj para no romper la app
+            pass
+
+    # 2. Borramos la reserva
+    db.delete(reserva)
+
+    # 3. 🛡️ EL ESCUDO ANTI-DESPISTES (REEMBOLSO)
     if alumno and alumno.clases_restantes != 999:
-        alumno.clases_restantes += 1  # ¡Le devolvemos su clase!
+        alumno.clases_restantes += 1  # Le devolvemos su clase
         
-    # Guardamos los cambios en la base de datos (Borrado + Reembolso al mismo tiempo)
     db.commit()
 
     # --- LÓGICA DE NOTIFICACIÓN ---
     if clase and clase.profesor_id:
         profesor = db.query(models.Usuario).filter(models.Usuario.id == clase.profesor_id).first()
-        
         if profesor and alumno:
-            # Mandamos a ejecutar el correo simulado en segundo plano al profesor
             background_tasks.add_task(
                 simular_envio_correo,
                 profesor.email,
