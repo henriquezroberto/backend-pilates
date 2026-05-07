@@ -174,6 +174,48 @@ def enviar_correo_reserva(email_destino: str, nombre: str, nombre_clase: str, fe
     except Exception as e:
         print(f"Error al enviar confirmación de reserva: {e}")
 
+def enviar_correo_cancelacion(email_destino: str, nombre: str, nombre_clase: str, fecha: str, hora: str):
+    api_key = os.getenv("BREVO_API_KEY")
+    if not api_key:
+        print("Falta la llave de Brevo para enviar confirmación de cancelación.")
+        return
+    
+    url = "https://api.brevo.com/v3/smtp/email"
+    headers = {
+        "accept": "application/json",
+        "api-key": api_key,
+        "content-type": "application/json"
+    }
+    
+    data = {
+        "sender": {"name": "Centro Pilates Pilocas", "email": "contactocentropilates@gmail.com"},
+        "to": [{"email": email_destino, "name": nombre}],
+        "subject": f"Cancelación Exitosa - {nombre_clase}",
+        "htmlContent": f"""
+        <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: auto;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h2 style="color: #E65100; margin: 0;">Cancelación Confirmada ✔️</h2>
+            </div>
+            <p>Hola <b>{nombre}</b>,</p>
+            <p>Te confirmamos que hemos procesado la cancelación de tu clase exitosamente.</p>
+            
+            <div style="background-color: #FFF3E0; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                <p style="margin: 5px 0; font-size: 16px;">🧘‍♀️ <b>Clase:</b> {nombre_clase}</p>
+                <p style="margin: 5px 0; font-size: 16px;">📅 <b>Fecha:</b> {fecha}</p>
+                <p style="margin: 5px 0; font-size: 16px;">⏰ <b>Hora:</b> {hora}</p>
+            </div>
+            
+            <p><b>¡Buena noticia!</b> El cupo de esta clase ha sido devuelto a tu saldo mensual de manera automática para que puedas agendar en otro horario.</p>
+            <br>
+            <p>Esperamos verte pronto,<br><b>El equipo de Centro Pilates</b></p>
+        </div>
+        """
+    }
+    
+    try:
+        requests.post(url, headers=headers, json=data)
+    except Exception as e:
+        print(f"Error al enviar correo de cancelación: {e}")
 
 # ESTRUCTURAS DE DATOS PARA ADMINISTRADORES
 class DatosAdmin(BaseModel):
@@ -731,15 +773,28 @@ def cancelar_reserva(
     db.commit()
 
     # --- LÓGICA DE NOTIFICACIÓN ---
-    if clase and clase.profesor_id:
-        profesor = db.query(models.Usuario).filter(models.Usuario.id == clase.profesor_id).first()
-        if profesor and alumno:
+    if clase:
+        # 1. Le avisamos al alumno que su cancelación fue exitosa
+        if alumno:
             background_tasks.add_task(
-                simular_envio_correo,
-                profesor.email,
-                "⚠️ Cupo liberado en tu clase",
-                f"El alumno {alumno.nombre} ha cancelado su asistencia a '{clase.nombre}'. El cupo está disponible nuevamente en el sistema."
+                enviar_correo_cancelacion,
+                email_destino=alumno.email,
+                nombre=alumno.nombre,
+                nombre_clase=clase.nombre,
+                fecha=clase.fecha,
+                hora=clase.hora
             )
+
+        # 2. Le avisamos al profesor que se liberó un cupo (simulado)
+        if clase.profesor_id:
+            profesor = db.query(models.Usuario).filter(models.Usuario.id == clase.profesor_id).first()
+            if profesor and alumno:
+                background_tasks.add_task(
+                    simular_envio_correo,
+                    profesor.email,
+                    "⚠️ Cupo liberado en tu clase",
+                    f"El alumno {alumno.nombre} ha cancelado su asistencia a '{clase.nombre}'. El cupo está disponible nuevamente en el sistema."
+                )
 
     return {"mensaje": "Reserva cancelada y clase devuelta a tu saldo"}
 
