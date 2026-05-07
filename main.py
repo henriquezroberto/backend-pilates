@@ -245,12 +245,14 @@ from contextlib import asynccontextmanager
 async def lifespan(app: FastAPI):
     db = SessionLocal()
     
-    # TRUCO: Intentamos crear la columna 'asistio' por si no existe. 
-    # Si ya existe, simplemente ignora el error y sigue.
+    # TRUCO CORREGIDO PARA POSTGRESQL: Usamos FALSE en lugar de 0
     try:
-        db.execute(text("ALTER TABLE reservas ADD COLUMN asistio BOOLEAN DEFAULT 0"))
+        db.execute(text("ALTER TABLE reservas ADD COLUMN asistio BOOLEAN DEFAULT FALSE"))
         db.commit()
-    except Exception:
+        print("Columna 'asistio' agregada correctamente.")
+    except Exception as e:
+        # Imprimimos el error por si acaso, pero hacemos rollback para que la app no muera
+        print(f"Nota de BD (ignorar si la columna ya existe): {e}")
         db.rollback()
         
     inicializar_planes(db)
