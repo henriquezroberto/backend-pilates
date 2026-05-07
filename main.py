@@ -950,6 +950,30 @@ def recuperar_password(datos: RecuperarPasswordData, background_tasks: Backgroun
         db.rollback()
         raise HTTPException(status_code=500, detail="Error al generar nueva contraseña")
 
+# ==========================================
+# 📊 DASHBOARD DEL ADMINISTRADOR
+# ==========================================
+@app.get("/admin/dashboard")
+def obtener_dashboard_admin(db: Session = Depends(get_db)):
+    # Contamos cuántos alumnos activos hay
+    total_alumnos = db.query(models.Usuario).filter(
+        models.Usuario.rol == "alumno", 
+        models.Usuario.activo == True
+    ).count()
+    
+    # Contamos el total de clases creadas
+    total_clases = db.query(models.Clase).count()
+    
+    # Contamos cuántas reservas se han hecho en total
+    total_reservas = db.query(models.Reserva).count()
+
+    return {
+        "alumnos_activos": total_alumnos,
+        "clases_registradas": total_clases,
+        "reservas_totales": total_reservas
+    }
+
+
 # --- SIMULADOR DE NOTIFICACIONES ---
 def simular_envio_correo(destinatario: str, asunto: str, mensaje: str):
     # En el futuro, aquí conectarías SendGrid, AWS SES o Twilio (WhatsApp)
@@ -960,3 +984,4 @@ def simular_envio_correo(destinatario: str, asunto: str, mensaje: str):
     print(f"Mensaje: {mensaje}")
     print("✔️ Enviado con éxito.")
     print("="*50 + "\n")
+
