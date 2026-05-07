@@ -432,15 +432,26 @@ def crear_clase(datos: ClaseData, db: Session = Depends(get_db)):
 # 1. Actualización para ver el nombre del profesor en la lista general
 @app.get("/clases")
 def obtener_clases(profesor_id: Optional[int] = None, db: Session = Depends(get_db)):
-    # Si la petición incluye un 'profesor_id' (Ej: /clases?profesor_id=5)
+    ahora = datetime.now()
+    query = db.query(models.Clase)
+    
     if profesor_id:
-        # Filtramos y devolvemos SOLO las clases donde él es el profesor
-        clases = db.query(models.Clase).filter(models.Clase.profesor_id == profesor_id).all()
-    else:
-        # Si no nos envían ID (como cuando entra el Administrador), devolvemos TODAS
-        clases = db.query(models.Clase).all()
-        
-    return clases
+        query = query.filter(models.Clase.profesor_id == profesor_id)
+    
+    todas_las_clases = query.all()
+    
+    # Filtramos: Solo enviamos clases cuya fecha y hora sean futuras
+    clases_futuras = []
+    for c in todas_las_clases:
+        try:
+            fecha_clase = datetime.strptime(f"{c.fecha} {c.hora}", "%Y-%m-%d %H:%M")
+            if fecha_clase > ahora:
+                clases_futuras.append(c)
+        except:
+            # Si hay un error de formato, la incluimos por si acaso
+            clases_futuras.append(c)
+            
+    return clases_futuras
 
 # Nuevo endpoint para editar datos de la clase (como el profesor)
 @app.put("/clases/{clase_id}")
@@ -462,31 +473,34 @@ def actualizar_clase(clase_id: int, datos: dict, db: Session = Depends(get_db)):
 @app.get("/mis-clases/{usuario_id}")
 def obtener_mis_clases(usuario_id: int, db: Session = Depends(get_db)):
     usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
-    if not usuario:
-        return []
+    if not usuario: return []
     
+    ahora = datetime.now()
     resultado = []
-    if usuario.rol == 'profesor':
-        clases = db.query(models.Clase).filter(models.Clase.profesor_id == usuario.id).all()
-        for c in clases:
+    
+    # Obtener reservas del usuario
+    reservas = db.query(models.Reserva).filter(models.Reserva.usuario_id == usuario_id).all()
+    
+    # Ejemplo dentro del bucle de reservas:
+    for r in reservas:
+        clase = db.query(models.Clase).filter(models.Clase.id == r.clase_id).first()
+        if clase:
+            # CALCULAMOS SI YA PASÓ
+            try:
+                fecha_clase = datetime.strptime(f"{clase.fecha} {clase.hora}", "%Y-%m-%d %H:%M")
+                es_pasada = fecha_clase < ahora
+            except:
+                es_pasada = False
+
             resultado.append({
-                "id": c.id, "nombre": c.nombre, "fecha": c.fecha, "hora": c.hora, 
-                "disciplina": c.disciplina, "profesor_nombre": usuario.nombre,
-                "profesor_id": usuario.id # <--- SE AGREGÓ ESTO PARA FLUTTER
+                "id": clase.id,
+                "nombre": clase.nombre,
+                "fecha": clase.fecha,
+                "hora": clase.hora,
+                "disciplina": clase.disciplina,
+                "profesor_nombre": "...", # lo que ya tienes
+                "es_pasada": es_pasada    # <--- NUEVA ETIQUETA
             })
-    else:
-        reservas = db.query(models.Reserva).filter(models.Reserva.usuario_id == usuario_id).all()
-        for r in reservas:
-            clase = db.query(models.Clase).filter(models.Clase.id == r.clase_id).first()
-            if clase:
-                prof = db.query(models.Usuario).filter(models.Usuario.id == clase.profesor_id).first()
-                resultado.append({
-                    "id": clase.id, "nombre": clase.nombre, "fecha": clase.fecha, "hora": clase.hora, 
-                    "disciplina": clase.disciplina, 
-                    "profesor_nombre": prof.nombre if prof else "Por asignar",
-                    "profesor_id": clase.profesor_id # <--- SE AGREGÓ ESTO PARA FLUTTER
-                })
-                
     return resultado
 
 # Endpoint para que el Admin vea la lista de alumnos de una clase
