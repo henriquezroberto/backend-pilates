@@ -440,18 +440,27 @@ def obtener_clases(profesor_id: Optional[int] = None, db: Session = Depends(get_
     
     todas_las_clases = query.all()
     
-    # Filtramos: Solo enviamos clases cuya fecha y hora sean futuras
-    clases_futuras = []
+    resultado = []
     for c in todas_las_clases:
         try:
             fecha_clase = datetime.strptime(f"{c.fecha} {c.hora}", "%Y-%m-%d %H:%M")
-            if fecha_clase > ahora:
-                clases_futuras.append(c)
+            es_pasada = fecha_clase < ahora
         except:
-            # Si hay un error de formato, la incluimos por si acaso
-            clases_futuras.append(c)
+            es_pasada = False
             
-    return clases_futuras
+        # Enviamos TODAS las clases, pero le pegamos la etiqueta "es_pasada" a cada una
+        resultado.append({
+            "id": c.id,
+            "nombre": c.nombre,
+            "fecha": c.fecha,
+            "hora": c.hora,
+            "cupo_maximo": c.cupo_maximo,
+            "profesor_id": c.profesor_id,
+            "disciplina": c.disciplina,
+            "es_pasada": es_pasada
+        })
+            
+    return resultado
 
 # Nuevo endpoint para editar datos de la clase (como el profesor)
 @app.put("/clases/{clase_id}")
