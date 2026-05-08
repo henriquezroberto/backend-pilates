@@ -4,3 +4,5 @@ sqlalchemy==2.0.23
 pydantic==2.5.2
 psycopg2-binary ==2.9.6
 requests==2.31.0
+cloudinary
+python-multipart

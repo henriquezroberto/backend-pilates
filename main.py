@@ -17,6 +17,32 @@ from urllib import request as urllib_request, error as urllib_error
 from datetime import datetime, timedelta
 import random
 import string
+import cloudinary
+import cloudinary.uploader
+from fastapi import UploadFile, File
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    db = SessionLocal()
+    
+    # 🛡️ PARCHE AUTOMÁTICO PARA FOTOS DE PERFIL
+    try:
+        # Intentamos agregar la columna 'foto_url' a la tabla 'usuarios'
+        # Usamos VARCHAR para que guarde el link largo de Cloudinary
+        db.execute(text("ALTER TABLE usuarios ADD COLUMN foto_url VARCHAR DEFAULT NULL"))
+        db.commit()
+        print("Columna 'foto_url' creada exitosamente.")
+    except Exception as e:
+        # Si la columna ya existe, PostgreSQL lanzará un error que atrapamos aquí
+        db.rollback()
+        print(f"Nota de BD: La columna 'foto_url' ya existe o no se pudo crear: {e}")
+        
+    # Aquí puedes mantener los otros parches que ya tenemos (como el de los planes)
+    inicializar_planes(db)
+    
+    db.close()
+    yield
+
 
 # Función para crear los planes si la tabla está vacía
 def inicializar_planes(db: Session):
@@ -1056,6 +1082,34 @@ def obtener_dashboard_admin(db: Session = Depends(get_db)):
         "reservas_totales": total_reservas
     }
 
+# ==========================================
+# 📸 SUBIDA DE FOTOS DE PERFIL
+# ==========================================
+# Leemos las llaves secretas que guardaste en Render
+cloudinary.config( 
+  cloud_name = os.getenv("CLOUDINARY_CLOUD_NAME"), 
+  api_key = os.getenv("CLOUDINARY_API_KEY"), 
+  api_secret = os.getenv("CLOUDINARY_API_SECRET") 
+)
+
+@app.post("/usuarios/{usuario_id}/foto")
+async def subir_foto(usuario_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    try:
+        # 1. Subimos el archivo a Cloudinary
+        resultado = cloudinary.uploader.upload(file.file)
+        url_imagen = resultado.get("secure_url")
+
+        # 2. Guardamos la URL en la base de datos del usuario
+        usuario.foto_url = url_imagen
+        db.commit()
+
+        return {"mensaje": "Foto actualizada con éxito", "foto_url": url_imagen}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al subir imagen: {str(e)}")
 
 # --- SIMULADOR DE NOTIFICACIONES ---
 def simular_envio_correo(destinatario: str, asunto: str, mensaje: str):
