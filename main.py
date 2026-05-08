@@ -1113,6 +1113,17 @@ async def subir_foto(usuario_id: int, file: UploadFile = File(...), db: Session 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al subir imagen: {str(e)}")
 
+@app.get("/mantenimiento-db")
+def parche_base_datos(db: Session = Depends(get_db)):
+    try:
+        # Forzamos la creación de la columna directamente
+        db.execute(text("ALTER TABLE usuarios ADD COLUMN foto_url VARCHAR DEFAULT NULL"))
+        db.commit()
+        return {"mensaje": "¡Éxito! Columna foto_url creada en la base de datos."}
+    except Exception as e:
+        db.rollback()
+        return {"error": f"La columna ya existe o hubo un error: {str(e)}"}
+
 # --- SIMULADOR DE NOTIFICACIONES ---
 def simular_envio_correo(destinatario: str, asunto: str, mensaje: str):
     # En el futuro, aquí conectarías SendGrid, AWS SES o Twilio (WhatsApp)
