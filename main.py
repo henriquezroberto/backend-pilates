@@ -939,7 +939,8 @@ def obtener_perfil(usuario_id: int, db: Session = Depends(get_db)):
         "email": usuario.email,
         "plan_nombre": plan_nombre,
         "clases_restantes": usuario.clases_restantes,
-        "fecha_vencimiento": usuario.fecha_vencimiento_plan or "N/A"
+        "fecha_vencimiento": usuario.fecha_vencimiento_plan or "N/A",
+        "foto_url": usuario.foto_url  # <--- ¡ESTA ES LA PIEZA QUE FALTA!
     }
 
 # ELIMINAR USUARIO (Alumno, Profesor o Admin)
@@ -1113,16 +1114,6 @@ async def subir_foto(usuario_id: int, file: UploadFile = File(...), db: Session 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al subir imagen: {str(e)}")
 
-@app.get("/mantenimiento-db")
-def parche_base_datos(db: Session = Depends(get_db)):
-    try:
-        # Forzamos la creación de la columna directamente
-        db.execute(text("ALTER TABLE usuarios ADD COLUMN foto_url VARCHAR DEFAULT NULL"))
-        db.commit()
-        return {"mensaje": "¡Éxito! Columna foto_url creada en la base de datos."}
-    except Exception as e:
-        db.rollback()
-        return {"error": f"La columna ya existe o hubo un error: {str(e)}"}
 
 # --- SIMULADOR DE NOTIFICACIONES ---
 def simular_envio_correo(destinatario: str, asunto: str, mensaje: str):
