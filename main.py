@@ -20,6 +20,8 @@ import string
 import cloudinary
 import cloudinary.uploader
 from fastapi import UploadFile, File
+from sqlalchemy import text # <-- Para ejecutar comandos SQL directos
+from contextlib import asynccontextmanager # <-- ¡La pieza que faltaba!
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
