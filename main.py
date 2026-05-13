@@ -1114,6 +1114,9 @@ async def subir_foto(usuario_id: int, file: UploadFile = File(...), db: Session 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al subir imagen: {str(e)}")
 
+@app.get("/ping")
+def mantener_despierto():
+    return {"status": "ok", "mensaje": "Zeus sigue despierto"}
 
 # --- SIMULADOR DE NOTIFICACIONES ---
 def simular_envio_correo(destinatario: str, asunto: str, mensaje: str):
