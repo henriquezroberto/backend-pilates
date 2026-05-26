@@ -20,6 +20,8 @@ class Usuario(Base):
     telefono = Column(String, nullable=True) # <-- AGREGAR ESTA LÍNEA
     # 📍 NUEVO: Guarda el link de la foto
     foto_url = Column(String, nullable=True)
+    # 📍 NUEVO: Guarda el Token de Firebase del celular
+    fcm_token = Column(String, nullable=True)
     
     # LA BILLETERA VIRTUAL DEL ALUMNO
     plan_id = Column(Integer, ForeignKey("planes.id"), nullable=True)

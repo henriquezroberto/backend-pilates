@@ -38,7 +38,16 @@ async def lifespan(app: FastAPI):
         # Si la columna ya existe, PostgreSQL lanzará un error que atrapamos aquí
         db.rollback()
         print(f"Nota de BD: La columna 'foto_url' ya existe o no se pudo crear: {e}")
-        
+
+    # 🛡️ Parche 2: NUEVO (Token FCM)
+    try:
+        db.execute(text("ALTER TABLE usuarios ADD COLUMN fcm_token VARCHAR DEFAULT NULL"))
+        db.commit()
+        print("Columna 'fcm_token' creada exitosamente.")
+    except Exception as e:
+        db.rollback()
+        print(f"La columna 'fcm_token' ya existe o hubo un error: {e}")
+
     # Aquí puedes mantener los otros parches que ya tenemos (como el de los planes)
     inicializar_planes(db)
     
@@ -267,6 +276,10 @@ class CambioPassword(BaseModel):
     password_actual: str
     password_nueva: str
 
+# Creamos un esquema pequeñito solo para recibir el token
+class TokenFCM(BaseModel):
+    token: str
+
 # NUEVO MOLDE PARA EDITAR PROFESOR
 class DatosProfesor(BaseModel):
     nombre: Optional[str] = None
@@ -322,6 +335,17 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="API Centro Pilates", lifespan=lifespan)
+
+@app.put("/usuarios/{usuario_id}/fcm-token")
+def guardar_token_fcm(usuario_id: int, datos: TokenFCM, db: Session = Depends(get_db)):
+    usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    # Guardamos el token en el perfil del usuario
+    usuario.fcm_token = datos.token
+    db.commit()
+    return {"mensaje": "Token FCM guardado exitosamente en el Olimpo"}
 
 @app.get("/historial/{usuario_id}")
 def obtener_historial(usuario_id: int, db: Session = Depends(get_db)):
