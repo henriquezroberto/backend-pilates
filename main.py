@@ -1109,6 +1109,18 @@ def obtener_dashboard_admin(db: Session = Depends(get_db)):
         "reservas_totales": total_reservas
     }
 
+@app.get("/mantenimiento-db")
+def parche_base_datos(db: Session = Depends(get_db)):
+    try:
+        # Ahora forzamos la creación de la columna fcm_token
+        db.execute(text("ALTER TABLE usuarios ADD COLUMN fcm_token VARCHAR DEFAULT NULL"))
+        db.commit()
+        return {"mensaje": "¡Éxito! Columna fcm_token creada en la base de datos."}
+    except Exception as e:
+        db.rollback()
+        return {"error": f"La columna ya existe o hubo un error: {str(e)}"}
+
+
 # ==========================================
 # 📸 SUBIDA DE FOTOS DE PERFIL
 # ==========================================
