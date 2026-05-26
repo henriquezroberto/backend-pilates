@@ -22,6 +22,16 @@ import cloudinary.uploader
 from fastapi import UploadFile, File
 from sqlalchemy import text # <-- Para ejecutar comandos SQL directos
 from contextlib import asynccontextmanager # <-- ¡La pieza que faltaba!
+import firebase_admin
+from firebase_admin import credentials, messaging
+
+# Inicializamos Firebase
+try:
+    cred = credentials.Certificate("firebase-key.json") # Asegúrate de que el nombre coincida
+    firebase_admin.initialize_app(cred)
+    print("🔥 Firebase Admin inicializado correctamente")
+except Exception as e:
+    print(f"⚠️ Error al inicializar Firebase: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -335,6 +345,33 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="API Centro Pilates", lifespan=lifespan)
+
+@app.post("/prueba-notificacion/{usuario_id}")
+def enviar_notificacion_prueba(usuario_id: int, db: Session = Depends(get_db)):
+    # 1. Buscamos al usuario en la base de datos
+    usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
+    
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    if not usuario.fcm_token:
+        raise HTTPException(status_code=400, detail="El usuario no tiene un Token registrado")
+
+    # 2. Armamos el mensaje para Firebase
+    mensaje = messaging.Message(
+        notification=messaging.Notification(
+            title="¡Zeus te saluda! ⚡",
+            body=f"Hola {usuario.nombre}, si estás leyendo esto, las notificaciones de Pilocas funcionan a la perfección."
+        ),
+        token=usuario.fcm_token, # Apuntamos el misil a este celular específico
+    )
+
+    # 3. Disparamos la notificación
+    try:
+        response = messaging.send(mensaje)
+        return {"mensaje": "Notificación enviada con éxito", "firebase_response": response}
+    except Exception as e:
+        return {"error": f"Error al enviar notificación: {str(e)}"}
 
 @app.put("/usuarios/{usuario_id}/fcm-token")
 def guardar_token_fcm(usuario_id: int, datos: TokenFCM, db: Session = Depends(get_db)):
