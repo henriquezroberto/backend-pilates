@@ -1146,6 +1146,51 @@ def obtener_dashboard_admin(db: Session = Depends(get_db)):
         "reservas_totales": total_reservas
     }
 
+@app.post("/clases/{clase_id}/cancelar")
+def cancelar_clase_y_notificar(clase_id: int, db: Session = Depends(get_db)):
+    # 1. Verificamos si la clase existe (Asumiendo tu modelo Clase)
+    # clase = db.query(models.Clase).filter(models.Clase.id == clase_id).first()
+    
+    # 2. Buscamos los TOKENS de todos los alumnos inscritos en esa clase.
+    # Aquí hacemos un JOIN entre tu tabla de Reservas y Usuarios para traer solo los tokens válidos.
+    query_tokens = text("""
+        SELECT u.fcm_token 
+        FROM usuarios u
+        JOIN reservas r ON r.usuario_id = u.id
+        WHERE r.clase_id = :clase_id AND u.fcm_token IS NOT NULL
+    """)
+    
+    resultado = db.execute(query_tokens, {"clase_id": clase_id}).fetchall()
+    # Convertimos el resultado en una lista limpia de strings de Python
+    tokens_alumnos = [fila[0] for fila in resultado]
+
+    # Si nadie se había inscrito a la clase, cancelamos silenciosamente
+    if not tokens_alumnos:
+        return {"mensaje": "Clase cancelada, no había alumnos inscritos."}
+
+    # 3. Armamos el paquete multidifusión para Firebase
+    mensaje_masivo = messaging.MulticastMessage(
+        notification=messaging.Notification(
+            title="🚨 Clase Cancelada",
+            body="Atención: La clase de Pilates programada para hoy ha sido suspendida. Revisa tu app para reagendar."
+        ),
+        tokens=tokens_alumnos, # Pasamos la lista completa de tokens
+    )
+
+    # 4. Disparamos el paquete a Firebase
+    try:
+        response = messaging.send_each_for_multicast(mensaje_masivo)
+        
+        # Opcional: Tu lógica para cambiar el estado de la clase a 'cancelada' en la DB
+        # ...
+        
+        return {
+            "mensaje": f"Clase cancelada con éxito. Avisos enviados a {response.success_count} alumnos.",
+            "fallidos": response.failure_count
+        }
+    except Exception as e:
+        return {"error": f"La clase se canceló pero falló el envío de notificaciones: {str(e)}"}
+
 @app.get("/mantenimiento-db")
 def parche_base_datos(db: Session = Depends(get_db)):
     try:
