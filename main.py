@@ -880,7 +880,7 @@ def cancelar_reserva(
             # Si escribiste mal la hora al crear la clase (ej: "18:00 pm"), ignoramos el reloj para no romper la app
             pass
 
-    # 2. Borramos la reserva
+    # 2. Borramos la reserva (El cupo queda libre en este milisegundo)
     db.delete(reserva)
 
     # 3. 🛡️ EL ESCUDO ANTI-DESPISTES (REEMBOLSO)
@@ -889,7 +889,62 @@ def cancelar_reserva(
         
     db.commit()
 
-    # --- LÓGICA DE NOTIFICACIÓN ---
+    # =======================================================
+    # 🧠 NUEVO: MOTOR AUTOMÁTICO DE LISTA DE ESPERA (CAMINO A)
+    # =======================================================
+    mensaje_adicional_lista = ""
+    
+    # Buscamos quién es el PRIMERO en la fila para esta clase específica
+    siguiente_en_fila = db.query(models.ListaEspera).filter(
+        models.ListaEspera.clase_id == clase_id
+    ).order_by(models.ListaEspera.fecha_solicitud.asc()).first()
+
+    if siguiente_en_fila:
+        id_afortunado = siguiente_en_fila.usuario_id
+        alumno_espera = db.query(models.Usuario).filter(models.Usuario.id == id_afortunado).first()
+
+        if alumno_espera:
+            # A. Validamos que el alumno en espera tenga saldo o plan ilimitado
+            if alumno_espera.clases_restantes > 0 or alumno_espera.clases_restantes == 999:
+                
+                # B. Creamos su reserva automática
+                nueva_reserva = models.Reserva(clase_id=clase_id, usuario_id=id_afortunado)
+                db.add(nueva_reserva)
+                
+                # C. Si no es ilimitado, consumimos una clase de su saldo
+                if alumno_espera.clases_restantes != 999:
+                    alumno_espera.clases_restantes -= 1
+                
+                # D. Lo sacamos de la lista de espera porque ya tiene su lugar seguro
+                db.delete(siguiente_en_fila)
+                db.commit()
+
+                mensaje_adicional_lista = f" Cupo asignado automáticamente al alumno {alumno_espera.nombre}."
+
+                # E. ⚡ DISPARAR RAYO DE ZEUS (Notificación Push)
+                if alumno_espera.fcm_token and clase:
+                    try:
+                        mensaje_push = messaging.Message(
+                            notification=messaging.Notification(
+                                title="✨ ¡Cupo Asegurado!",
+                                body=f"Se liberó un lugar y tu reserva para '{clase.nombre}' se ha realizado automáticamente. ¡Te esperamos!"
+                            ),
+                            token=alumno_espera.fcm_token,
+                        )
+                        messaging.send(mensaje_push)
+                        print(f"✅ Notificación Push enviada al usuario {id_afortunado} desde la lista de espera.")
+                    except Exception as e:
+                        print(f"⚠️ Error al enviar la notificación Push de lista de espera: {e}")
+                        
+                # F. Opcional: También le mandamos un correo en segundo plano para asegurar
+                background_tasks.add_task(
+                    simular_envio_correo,
+                    alumno_espera.email,
+                    "✨ ¡Cupo Asegurado en tu clase de Pilates!",
+                    f"Hola {alumno_espera.nombre}, se liberó un lugar en la clase '{clase.nombre}' el {clase.fecha} a las {clase.hora} y el sistema te ha inscrito automáticamente. ¡Disfruta tu clase!"
+                )
+
+    # --- LÓGICA DE NOTIFICACIÓN ORIGINAL ---
     if clase:
         # 1. Le avisamos al alumno que su cancelación fue exitosa
         if alumno:
@@ -902,7 +957,7 @@ def cancelar_reserva(
                 hora=clase.hora
             )
 
-        # 2. Le avisamos al profesor que se liberó un cupo (simulado)
+        # 2. Le avisamos al profesor que se liberó un cupo
         if clase.profesor_id:
             profesor = db.query(models.Usuario).filter(models.Usuario.id == clase.profesor_id).first()
             if profesor and alumno:
@@ -910,10 +965,10 @@ def cancelar_reserva(
                     simular_envio_correo,
                     profesor.email,
                     "⚠️ Cupo liberado en tu clase",
-                    f"El alumno {alumno.nombre} ha cancelado su asistencia a '{clase.nombre}'. El cupo está disponible nuevamente en el sistema."
+                    f"El alumno {alumno.nombre} ha cancelado su asistencia a '{clase.nombre}'.{mensaje_adicional_lista}"
                 )
 
-    return {"mensaje": "Reserva cancelada y clase devuelta a tu saldo"}
+    return {"mensaje": f"Reserva cancelada y clase devuelta a tu saldo.{mensaje_adicional_lista}"}
 
 @app.delete("/clases/{clase_id}")
 def eliminar_clase(clase_id: int, db: Session = Depends(get_db)):
@@ -1231,6 +1286,25 @@ async def subir_foto(usuario_id: int, file: UploadFile = File(...), db: Session 
         return {"mensaje": "Foto actualizada con éxito", "foto_url": url_imagen}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al subir imagen: {str(e)}")
+
+@app.post("/clases/{clase_id}/unirse-lista-espera")
+def unirse_a_lista_espera(clase_id: int, usuario_id: int, db: Session = Depends(get_db)):
+    # 1. Verificar si el usuario ya está en la lista de espera para esta clase
+    ya_espera = db.query(models.ListaEspera).filter(
+        models.ListaEspera.clase_id == clase_id,
+        models.ListaEspera.usuario_id == usuario_id
+    ).first()
+    
+    if ya_espera:
+        raise HTTPException(status_code=400, detail="Ya estás en la lista de espera de esta clase")
+
+    # 2. Registrar al alumno en la fila
+    nueva_espera = models.ListaEspera(clase_id=clase_id, usuario_id=usuario_id)
+    db.add(nueva_espera)
+    db.commit()
+    
+    return {"mensaje": "Te has unido a la lista de espera con éxito. ¡Te avisaremos si se libera un cupo!"}
+
 
 @app.get("/ping")
 def mantener_despierto():
