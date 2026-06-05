@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, DateTime
 from database import Base
+from datetime import datetime
 
 # --- 1. NUEVA TABLA: EL CATÁLOGO DE PLANES ---
 class Plan(Base):
@@ -48,3 +49,12 @@ class Reserva(Base):
     clase_id = Column(Integer, ForeignKey("clases.id"))
     # 📍 AGREGA ESTA LÍNEA AL FINAL DE LA CLASE:
     asistio = Column(Boolean, default=False)
+
+class ListaEspera(Base):
+    __tablename__ = "listas_espera"
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"))
+    clase_id = Column(Integer, ForeignKey("clases.id"))
+    # Guardamos la fecha y hora exacta para saber quién llegó primero a la fila
+    fecha_solicitud = Column(DateTime, default=datetime.utcnow)
