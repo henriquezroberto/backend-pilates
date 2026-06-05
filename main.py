@@ -529,7 +529,16 @@ def obtener_clases(profesor_id: Optional[int] = None, db: Session = Depends(get_
         except:
             es_pasada = False
             
-        # Enviamos TODAS las clases, pero le pegamos la etiqueta "es_pasada" a cada una
+        # ========================================================
+        # 🧠 MAGIA: CALCULAMOS LOS CUPOS REALES DISPONIBLES
+        # ========================================================
+        inscritos = db.query(models.Reserva).filter(models.Reserva.clase_id == c.id).count()
+        cupos_disponibles = c.cupo_maximo - inscritos
+        # Evitamos que de números negativos por si acaso
+        if cupos_disponibles < 0:
+            cupos_disponibles = 0
+            
+        # Enviamos TODAS las clases con sus nuevas etiquetas
         resultado.append({
             "id": c.id,
             "nombre": c.nombre,
@@ -538,7 +547,8 @@ def obtener_clases(profesor_id: Optional[int] = None, db: Session = Depends(get_
             "cupo_maximo": c.cupo_maximo,
             "profesor_id": c.profesor_id,
             "disciplina": c.disciplina,
-            "es_pasada": es_pasada
+            "es_pasada": es_pasada,
+            "cupos_disponibles": cupos_disponibles # <--- ¡LA VARIABLE QUE FLUTTER NECESITA!
         })
             
     return resultado
